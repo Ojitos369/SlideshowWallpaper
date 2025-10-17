@@ -35,7 +35,6 @@ import androidx.preference.PreferenceFragmentCompat;
 
 import io.github.doubi88.slideshowwallpaper.R;
 import io.github.doubi88.slideshowwallpaper.SlideshowWallpaperService;
-import io.github.doubi88.slideshowwallpaper.utilities.CompatibilityHelpers;
 
 public class WallpaperPreferencesFragment extends PreferenceFragmentCompat {
     public static int DEFAULT_SECONDS = 60;
@@ -80,7 +79,8 @@ public class WallpaperPreferencesFragment extends PreferenceFragmentCompat {
     private void updateSummaries(Resources resources) {
         SharedPreferences sharedPreferences = getPreferenceManager().getSharedPreferences();
         updateSummary(sharedPreferences, getResources().getString(R.string.preference_add_images_key));
-        updateSummary(sharedPreferences, resources.getString(R.string.preference_seconds_key));
+        updateSummary(sharedPreferences, resources.getString(R.string.preference_interval_value_key));
+        updateSummary(sharedPreferences, resources.getString(R.string.preference_interval_unit_key));
         updateSummary(sharedPreferences, resources.getString(R.string.preference_ordering_key));
         updateSummary(sharedPreferences, resources.getString(R.string.preference_too_wide_images_rule_key));
     }
@@ -111,19 +111,31 @@ public class WallpaperPreferencesFragment extends PreferenceFragmentCompat {
                     maxCount = 512;
                 }
                 findPreference(key).setSummary(res.getQuantityString(R.plurals.images_selected, imagesCount, imagesCount, maxCount));
-            } else if (key.equals(res.getString(R.string.preference_seconds_key))) {
-                String[] seconds = res.getStringArray(R.array.seconds);
-                String[] secondsValues = res.getStringArray(R.array.seconds_values);
-                String currentValue = sharedPreferences.getString(key, String.valueOf(DEFAULT_SECONDS));
-                int intValue = DEFAULT_SECONDS;
-                try {
-                    intValue = Integer.parseInt(currentValue);
-                } catch (NumberFormatException e) {
-                    intValue = DEFAULT_SECONDS;
+            } else if (key.equals(res.getString(R.string.preference_interval_value_key)) || key.equals(res.getString(R.string.preference_interval_unit_key))) {
+                String valueKey = res.getString(R.string.preference_interval_value_key);
+                String unitKey = res.getString(R.string.preference_interval_unit_key);
+
+                String intervalValueStr = sharedPreferences.getString(valueKey, "60");
+                String unitValueStr = sharedPreferences.getString(unitKey, "1");
+
+                findPreference(valueKey).setSummary(intervalValueStr);
+
+                String[] unitValues = res.getStringArray(R.array.interval_unit_values);
+                String[] unitEntries = res.getStringArray(R.array.interval_units);
+                int unitIndex = getIndex(unitValues, unitValueStr);
+                if (unitIndex != -1) {
+                    findPreference(unitKey).setSummary(unitEntries[unitIndex]);
                 }
-                int currentIntValue = CompatibilityHelpers.getNextAvailableSecondsEntry(intValue, secondsValues);
-                int index = getIndex(secondsValues, String.valueOf(currentIntValue));
-                findPreference(key).setSummary(seconds[index]);
+
+                try {
+                    int intervalValue = Integer.parseInt(intervalValueStr);
+                    int unitValue = Integer.parseInt(unitValueStr);
+                    int totalSeconds = intervalValue * unitValue;
+                    sharedPreferences.edit().putString(res.getString(R.string.preference_seconds_key), String.valueOf(totalSeconds)).apply();
+                } catch (NumberFormatException e) {
+                    // Handle exception if parsing fails
+                }
+
             } else if (key.equals(res.getString(R.string.preference_ordering_key))) {
                 String[] orderings = res.getStringArray(R.array.orderings);
                 String[] orderingValues = res.getStringArray(R.array.ordering_values);

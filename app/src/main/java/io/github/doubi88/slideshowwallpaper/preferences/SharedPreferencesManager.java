@@ -40,6 +40,7 @@ public class SharedPreferencesManager {
     private static final String PREFERENCE_KEY_TOO_WIDE_IMAGES_RULE = "too_wide_images_rule";
     private static final String PREFERENCE_KEY_ANTI_ALIAS = "anti_alias";
     private static final String PREFERENCE_KEY_ANTI_ALIAS_WHILE_SCROLLING = "anti_alias_scrolling";
+    private static final String PREFERENCE_KEY_SWIPE = "swipe";
 
     public enum Ordering {
         SELECTION(0, PREFERENCE_KEY_URI_LIST) {
@@ -262,5 +263,9 @@ public class SharedPreferencesManager {
         SharedPreferences.Editor editor = preferences.edit();
         editor.putBoolean(PREFERENCE_KEY_ANTI_ALIAS_WHILE_SCROLLING, value);
         editor.apply();
+    }
+
+    public boolean getSwipeToChange() {
+        return preferences.getBoolean(PREFERENCE_KEY_SWIPE, true);
     }
 }

@@ -1,21 +1,3 @@
-/*
- * Slideshow Wallpaper: An Android live wallpaper displaying custom images.
- * Copyright (C) 2022  Doubi88 <tobis_mail@yahoo.de>
- *
- * Slideshow Wallpaper is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * Slideshow Wallpaper is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- *
- */
 package io.github.doubi88.slideshowwallpaper;
 
 import android.app.WallpaperColors;
@@ -30,7 +12,12 @@ import android.os.Handler;
 import android.os.Looper;
 import android.service.wallpaper.WallpaperService;
 import android.util.Log;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
+import android.os.Bundle;
+import android.app.WallpaperManager;
+
 
 import androidx.annotation.RequiresApi;
 
@@ -69,6 +56,7 @@ public class SlideshowWallpaperService extends WallpaperService {
         private boolean isScrolling = false;
 
         private SharedPreferencesManager manager;
+        private GestureDetector gestureDetector;
 
         public SlideshowWallpaperEngine() {
             SharedPreferences prefs = getSharedPreferences();
@@ -96,6 +84,32 @@ public class SlideshowWallpaperService extends WallpaperService {
             textSize = (int) (10f * scale + 0.5f);
             textPaint.setTextSize(textSize);
             handler.post(drawRunner);
+
+            gestureDetector = new GestureDetector(getApplicationContext(), new GestureDetector.SimpleOnGestureListener() {
+                private static final int SWIPE_THRESHOLD_VELOCITY = 200;
+
+                @Override
+                public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                    if (manager.getSwipeToChange()) {
+                        if (e1.getX() - e2.getX() > 50 && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
+                            currentImageHandler.forceNextImage(getApplicationContext());
+                        } else if (e2.getX() - e1.getX() > 50 && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
+                            currentImageHandler.forcePreviousImage(getApplicationContext());
+                        }
+                    }
+                    return super.onFling(e1, e2, velocityX, velocityY);
+                }
+            });
+        }
+
+        @Override
+        public void onTouchEvent(MotionEvent event) {
+            gestureDetector.onTouchEvent(event);
+        }
+
+        @Override
+        public Bundle onCommand(String action, int x, int y, int z, Bundle extras, boolean resultRequested) {
+            return super.onCommand(action, x, y, z, extras, resultRequested);
         }
 
         @Override

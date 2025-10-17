@@ -33,6 +33,8 @@ import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
 
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.PickVisualMediaRequest;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -40,6 +42,7 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -194,14 +197,16 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         if (resultCode == RESULT_OK && requestCode == UCrop.REQUEST_CROP) {
             final Uri resultUri = UCrop.getOutput(data);
             if (originalUri != null && resultUri != null) {
-                try {
-                    Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(), resultUri);
-                    OutputStream outputStream = getContentResolver().openOutputStream(originalUri);
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
-                    outputStream.close();
-                    imageListAdapter.notifyDataSetChanged();
-                } catch (IOException e) {
-                    e.printStackTrace();
+                // Replace the original URI with the new cropped URI
+                manager.removeUri(originalUri);
+                manager.addUri(resultUri);
+
+                // Update the adapter
+                imageListAdapter.replaceUri(originalUri, resultUri);
+
+                // Release permission for the original URI if it's no longer needed
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && !manager.hasImageUri(originalUri)) {
+                    getContentResolver().releasePersistableUriPermission(originalUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 }
             }
             originalUri = null;
@@ -221,7 +226,8 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
                         uris.add(uri);
                     }
                 }
-            } else {
+            }
+            else {
                 for (int index = 0; index < clipData.getItemCount(); index++) {
                     Uri uri = clipData.getItemAt(index).getUri();
                     boolean takePermissionSuccess = takePermission(uri);
@@ -265,8 +271,17 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         options.setActiveControlsWidgetColor(ContextCompat.getColor(this, R.color.primaryColor));
 
         String destinationFileName = "croppedImage" + System.currentTimeMillis() + ".jpg";
-        UCrop.of(uri, Uri.fromFile(new File(getCacheDir(), destinationFileName)))
-                .withOptions(options)
-                .start(this);
+        File destinationFile = new File(getFilesDir(), destinationFileName);
+        Uri destinationUri = FileProvider.getUriForFile(this, "io.github.doubi88.slideshowwallpaper.provider", destinationFile);
+
+        UCrop uCrop = UCrop.of(uri, destinationUri)
+                .withOptions(options);
+
+        Intent intent = uCrop.getIntent(this);
+        intent.setClipData(ClipData.newUri(getContentResolver(), "dest", destinationUri));
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+
+        startActivityForResult(intent, UCrop.REQUEST_CROP);
     }
 }

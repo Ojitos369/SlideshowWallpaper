@@ -24,7 +24,10 @@
     <string name="preference_ordering">Ordering</string>
     <string name="error_reading_file">Error reading file</string>
     <string name="delete_button_description">Remove</string>
-    <string name="preference_seconds">Time between images</string>
+    <string name="preference_seconds">Image Change Interval</string>
+    <string name="preference_interval_value">Interval</string>
+    <string name="preference_interval_unit">Unit</string>
+    <string name="preference_swipe">Swipe to change image</string>
     <plurals name="images_selected">
         <item quantity="one">%d image selected (max. %d)</item>
         <item quantity="other">%d images selected (max. %d)</item>
@@ -83,5 +86,11 @@
         <item>1 day</item>
         <item>2 days</item>
         <item>7 days</item>
+    </string-array>
+
+    <string-array name="interval_units">
+        <item>Seconds</item>
+        <item>Minutes</item>
+        <item>Hours</item>
     </string-array>
 </resources>

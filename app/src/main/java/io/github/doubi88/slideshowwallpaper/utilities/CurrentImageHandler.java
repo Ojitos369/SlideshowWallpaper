@@ -92,16 +92,49 @@ public class CurrentImageHandler {
         return currentTimer != null && runnable;
     }
 
+    public void forceNextImage(Context context) {
+        if (runnable) {
+            if (currentTimer != null) {
+                currentTimer.cancel();
+            }
+            currentTimer = new Timer("CurrentImageHandlerTimer");
+            currentTimer.schedule(new Runner(context, Direction.NEXT, true), 0);
+        }
+    }
+
+    public void forcePreviousImage(Context context) {
+        if (runnable) {
+            if (currentTimer != null) {
+                currentTimer.cancel();
+            }
+            currentTimer = new Timer("CurrentImageHandlerTimer");
+            currentTimer.schedule(new Runner(context, Direction.PREVIOUS, true), 0);
+        }
+    }
+
+    private enum Direction {
+        NEXT, PREVIOUS
+    }
+
     public class Runner extends TimerTask {
         private Context context;
+        private Direction direction;
+        private boolean isForced;
 
         public Runner(Context context) {
-            this.context = context;
+            this(context, Direction.NEXT, false);
         }
+
+        public Runner(Context context, Direction direction, boolean isForced) {
+            this.context = context;
+            this.direction = direction;
+            this.isForced = isForced;
+        }
+
         @Override
         public void run() {
             try {
-                boolean updated = loadNextImage(context);
+                boolean updated = loadNewImage(context, direction, isForced);
                 if (updated) {
                     notifyNextImageListeners(currentImage);
                 }
@@ -115,8 +148,8 @@ public class CurrentImageHandler {
         }
     }
 
-    private boolean loadNextImage(Context context) throws IOException {
-        Uri uri = getNextUri(context);
+    private boolean loadNewImage(Context context, Direction direction, boolean isForced) throws IOException {
+        Uri uri = getNextUri(context, direction, isForced);
         boolean result = false;
         if (uri != null) {
             if (currentImage == null || currentImage.getImage() == null || !uri.equals(currentImage.getUri())) {
@@ -127,7 +160,7 @@ public class CurrentImageHandler {
         return result;
     }
 
-    private Uri getNextUri(Context context) {
+    private Uri getNextUri(Context context, Direction direction, boolean isForced) {
         Uri result = null;
         Resources resources = context.getResources();
         SharedPreferencesManager.Ordering ordering = manager.getCurrentOrdering(resources);
@@ -137,23 +170,38 @@ public class CurrentImageHandler {
             int currentImageIndex = manager.getCurrentIndex();
             if (currentImageIndex >= countUris) {
                 // If an image was deleted and therefore we are over the end of the list
-                currentImageIndex -= countUris;
+                currentImageIndex = 0;
             }
-            long nextUpdate = calculateNextUpdateInSeconds(context);
-            if (nextUpdate <= 0) {
-                int delay = getDelaySeconds(context);
-                while (nextUpdate <= 0) {
-                    currentImageIndex++;
 
-                    if (currentImageIndex >= countUris) {
-                        currentImageIndex = 0;
-                    }
-
-                    nextUpdate += delay;
+            if (direction == Direction.PREVIOUS) {
+                currentImageIndex--;
+                if (currentImageIndex < 0) {
+                    currentImageIndex = countUris - 1;
                 }
-                manager.setCurrentIndex(currentImageIndex);
-                manager.setLastUpdate(System.currentTimeMillis());
+            } else { // Direction.NEXT
+                long nextUpdate = calculateNextUpdateInSeconds(context);
+                if (isForced || nextUpdate <= 0) {
+                    if (isForced) {
+                        currentImageIndex++;
+                        if (currentImageIndex >= countUris) {
+                            currentImageIndex = 0;
+                        }
+                    } else {
+                        int delay = getDelaySeconds(context);
+                        while (nextUpdate <= 0) {
+                            currentImageIndex++;
+                            if (currentImageIndex >= countUris) {
+                                currentImageIndex = 0;
+                            }
+                            nextUpdate += delay;
+                        }
+                    }
+                }
             }
+
+            manager.setCurrentIndex(currentImageIndex);
+            manager.setLastUpdate(System.currentTimeMillis());
+
             result = manager.getImageUri(currentImageIndex, ordering);
             currentIndex = currentImageIndex;
         }
@@ -173,12 +221,9 @@ public class CurrentImageHandler {
     }
 
     private int getDelaySeconds(Context context) {
-        Resources resources = context.getResources();
         int seconds = 5;
         try {
             seconds = manager.getSecondsBetweenImages();
-            String[] entries = resources.getStringArray(R.array.seconds_values);
-            seconds = CompatibilityHelpers.getNextAvailableSecondsEntry(seconds, entries); // Because of the update of the seconds entries (Issue #14), we have to find the nearest entry here.
         } catch (NumberFormatException e) {
             Log.e(CurrentImageHandler.class.getSimpleName(), "Invalid number", e);
         }
