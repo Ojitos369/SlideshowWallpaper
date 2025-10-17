@@ -34,6 +34,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 import io.github.doubi88.slideshowwallpaper.R;
+import io.github.doubi88.slideshowwallpaper.listeners.OnCropListener;
 import io.github.doubi88.slideshowwallpaper.listeners.OnSelectListener;
 import io.github.doubi88.slideshowwallpaper.utilities.AsyncTaskLoadImages;
 import io.github.doubi88.slideshowwallpaper.utilities.ImageInfo;
@@ -43,6 +44,7 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
 
     private List<Uri> uris;
     private List<OnSelectListener> listeners;
+    private OnCropListener cropListener;
     private HashMap<Uri, AsyncTaskLoadImages> loading;
     private HashSet<ImageInfo> selectedImages;
 
@@ -73,6 +75,7 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
             @Override
             public void onSelectionChanged(HashSet<ImageInfo> setInfo) {}
         });
+        holder.setOnCropListener(this.cropListener);
         return holder;
     }
 
@@ -80,6 +83,10 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
         if (!listeners.contains(listener)) {
             listeners.add(listener);
         }
+    }
+
+    public void setOnCropListener(OnCropListener listener) {
+        this.cropListener = listener;
     }
 
     private void notifyListeners() {
@@ -166,5 +173,13 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
         this.uris.addAll(uris);
 
         notifyItemRangeInserted(oldSize, uris.size());
+    }
+
+    public void updateUri(Uri oldUri, Uri newUri) {
+        int index = uris.indexOf(oldUri);
+        if (index != -1) {
+            uris.set(index, newUri);
+            notifyItemChanged(index);
+        }
     }
 }

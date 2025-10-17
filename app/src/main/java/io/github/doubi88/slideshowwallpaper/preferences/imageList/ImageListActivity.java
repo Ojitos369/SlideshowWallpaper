@@ -37,23 +37,26 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.GridLayoutManager;
-import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.yalantis.ucrop.UCrop;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 
 import io.github.doubi88.slideshowwallpaper.R;
+import io.github.doubi88.slideshowwallpaper.listeners.OnCropListener;
 import io.github.doubi88.slideshowwallpaper.listeners.OnSelectListener;
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager;
 import io.github.doubi88.slideshowwallpaper.utilities.ImageInfo;
 
-public class ImageListActivity extends AppCompatActivity {
+public class ImageListActivity extends AppCompatActivity implements OnCropListener {
 
     private SharedPreferencesManager manager;
     private static final int REQUEST_CODE_FILE = 1;
@@ -61,6 +64,7 @@ public class ImageListActivity extends AppCompatActivity {
     private ImageListAdapter imageListAdapter;
 
     private FloatingActionButton removeButton;
+    private Uri originalUri;
 
     @RequiresApi(Build.VERSION_CODES.KITKAT)
     private ActivityResultLauncher<PickVisualMediaRequest> launcher = null;
@@ -88,6 +92,7 @@ public class ImageListActivity extends AppCompatActivity {
         List<Uri> uris = manager.getImageUris(SharedPreferencesManager.Ordering.SELECTION);
 
         imageListAdapter = new ImageListAdapter(uris);
+        imageListAdapter.setOnCropListener(this);
         imageListAdapter.addOnSelectListener(new OnSelectListener() {
             @Override
             public void onImageSelected(ImageInfo info) {
@@ -182,6 +187,19 @@ public class ImageListActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode == RESULT_OK && requestCode == UCrop.REQUEST_CROP) {
+            final Uri resultUri = UCrop.getOutput(data);
+            if (originalUri != null && resultUri != null) {
+                manager.removeUri(originalUri);
+                manager.addUri(resultUri);
+                imageListAdapter.updateUri(originalUri, resultUri);
+            }
+            originalUri = null;
+        } else if (resultCode == UCrop.RESULT_ERROR) {
+            final Throwable cropError = UCrop.getError(data);
+            Log.e(ImageListActivity.class.getSimpleName(), "Crop error: " + cropError);
+        }
+
         List<Uri> uris = new LinkedList<>();
         if (requestCode == REQUEST_CODE_FILE && resultCode == Activity.RESULT_OK) {
             ClipData clipData = data.getClipData();
@@ -220,5 +238,25 @@ public class ImageListActivity extends AppCompatActivity {
             }
         }
         return takePermissionSuccess;
+    }
+
+    @Override
+    public void onCrop(Uri uri) {
+        this.originalUri = uri;
+        UCrop.Options options = new UCrop.Options();
+        options.setAspectRatioOptions(0, new com.yalantis.ucrop.model.AspectRatio("9:16", 9, 16),
+                new com.yalantis.ucrop.model.AspectRatio("16:9", 16, 9),
+                new com.yalantis.ucrop.model.AspectRatio("4:3", 4, 3),
+                new com.yalantis.ucrop.model.AspectRatio("3:4", 3, 4),
+                new com.yalantis.ucrop.model.AspectRatio("1:1", 1, 1));
+
+        options.setToolbarColor(ContextCompat.getColor(this, R.color.primaryColor));
+        options.setStatusBarColor(ContextCompat.getColor(this, R.color.primaryDarkColor));
+        options.setActiveControlsWidgetColor(ContextCompat.getColor(this, R.color.primaryColor));
+
+        String destinationFileName = "croppedImage" + System.currentTimeMillis() + ".jpg";
+        UCrop.of(uri, Uri.fromFile(new File(getCacheDir(), destinationFileName)))
+                .withOptions(options)
+                .start(this);
     }
 }

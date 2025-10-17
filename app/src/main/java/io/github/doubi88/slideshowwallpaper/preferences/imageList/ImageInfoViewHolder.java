@@ -36,6 +36,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 import io.github.doubi88.slideshowwallpaper.R;
+import io.github.doubi88.slideshowwallpaper.listeners.OnCropListener;
 import io.github.doubi88.slideshowwallpaper.listeners.OnSelectListener;
 import io.github.doubi88.slideshowwallpaper.utilities.ImageInfo;
 import io.github.doubi88.slideshowwallpaper.utilities.ImageLoader;
@@ -52,9 +53,11 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
     private final FrameLayout frameLayout;
     private final ImageView imageView;
     private final ImageView checkIcon;
+    private final ImageView cropIcon;
     private final ProgressBar progressBar;
 
     private LinkedList<OnSelectListener> listeners;
+    private OnCropListener cropListener;
 
 
     public ImageInfoViewHolder(View itemView) {
@@ -62,12 +65,21 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
         listeners = new LinkedList<>();
         imageView = itemView.findViewById(R.id.image_view);
         checkIcon = itemView.findViewById(R.id.check_icon);
+        cropIcon = itemView.findViewById(R.id.crop_icon);
         frameLayout = itemView.findViewById(R.id.frame_layout);
 
         itemView.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 toggleSelection();
+            }
+        });
+        cropIcon.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (cropListener != null) {
+                    cropListener.onCrop(imageInfo.getUri());
+                }
             }
         });
         progressBar = itemView.findViewById(R.id.progress_bar);
@@ -98,6 +110,7 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
         this.frameLayout.setPadding(0,0,0,0);
         this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.secondaryTextColor));
         this.checkIcon.setVisibility(View.GONE);
+        this.cropIcon.setVisibility(View.GONE);
 
         imageIsSelected = false;
     }
@@ -108,6 +121,7 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
         this.frameLayout.setPadding(10,10,10,10);
         this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.primaryLightColor));
         this.checkIcon.setVisibility(View.VISIBLE);
+        this.cropIcon.setVisibility(View.VISIBLE);
 
         imageIsSelected = true;
     }
@@ -148,6 +162,10 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
         if (!listeners.contains(listener)) {
             listeners.add(listener);
         }
+    }
+
+    public void setOnCropListener(OnCropListener listener) {
+        this.cropListener = listener;
     }
 
     public void notifyOnImageSelected(){

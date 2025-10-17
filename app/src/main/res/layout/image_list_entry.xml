@@ -51,4 +51,13 @@
         android:layout_margin="5dp"
         android:src="@drawable/ic_check"
         android:visibility="gone" />
+    <ImageView
+        android:id="@+id/crop_icon"
+        android:background="@drawable/circle_background"
+        android:layout_width="30dp"
+        android:layout_height="30dp"
+        android:layout_margin="5dp"
+        android:layout_gravity="top|end"
+        android:src="@drawable/ic_crop"
+        android:visibility="gone" />
 </androidx.cardview.widget.CardView>
