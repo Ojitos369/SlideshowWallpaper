@@ -24,9 +24,11 @@ import android.content.ClipData;
 import android.content.ContentResolver;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.util.Log;
 import android.view.MenuItem;
 import android.view.View;
@@ -45,6 +47,8 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.yalantis.ucrop.UCrop;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -190,9 +194,15 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         if (resultCode == RESULT_OK && requestCode == UCrop.REQUEST_CROP) {
             final Uri resultUri = UCrop.getOutput(data);
             if (originalUri != null && resultUri != null) {
-                manager.removeUri(originalUri);
-                manager.addUri(resultUri);
-                imageListAdapter.updateUri(originalUri, resultUri);
+                try {
+                    Bitmap bitmap = MediaStore.Images.Media.getBitmap(this.getContentResolver(), resultUri);
+                    OutputStream outputStream = getContentResolver().openOutputStream(originalUri);
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
+                    outputStream.close();
+                    imageListAdapter.notifyDataSetChanged();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
             originalUri = null;
         } else if (resultCode == UCrop.RESULT_ERROR) {

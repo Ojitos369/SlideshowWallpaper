@@ -174,12 +174,4 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
 
         notifyItemRangeInserted(oldSize, uris.size());
     }
-
-    public void updateUri(Uri oldUri, Uri newUri) {
-        int index = uris.indexOf(oldUri);
-        if (index != -1) {
-            uris.set(index, newUri);
-            notifyItemChanged(index);
-        }
-    }
 }
