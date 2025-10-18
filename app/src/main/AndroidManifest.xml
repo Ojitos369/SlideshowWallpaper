@@ -68,7 +68,6 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:launchMode="singleTop"
-            android:taskAffinity=":ucrop"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
 
         <provider
