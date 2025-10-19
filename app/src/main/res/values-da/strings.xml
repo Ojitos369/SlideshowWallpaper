@@ -80,4 +80,5 @@
     </string-array>
     <string name="remove_image">Fjern billede(r)</string>
 
+    <string name="no_images_selected_text">Vælg venligst mindst ét billede, før du indstiller tapetet.</string>
 </resources>

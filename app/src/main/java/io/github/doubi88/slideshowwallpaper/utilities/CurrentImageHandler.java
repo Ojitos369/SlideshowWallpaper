@@ -65,7 +65,7 @@ public class CurrentImageHandler {
 
     public void startTimer(Context context) {
         runnable = true;
-        long update = calculateNextUpdateInSeconds(context);
+        long update = getDelaySeconds(context);
         updateAfter(context, update);
     }
 
@@ -76,7 +76,7 @@ public class CurrentImageHandler {
         }
         if (runnable) {
             currentTimer = new Timer("CurrentImageHandlerTimer");
-            currentTimer.schedule(new Runner(context), delay < 0 ? 0 : delay);
+            currentTimer.schedule(new Runner(context), delay < 0 ? 0 : delay * 1000);
         }
     }
 
@@ -179,23 +179,9 @@ public class CurrentImageHandler {
                     currentImageIndex = countUris - 1;
                 }
             } else { // Direction.NEXT
-                long nextUpdate = calculateNextUpdateInSeconds(context);
-                if (isForced || nextUpdate <= 0) {
-                    if (isForced) {
-                        currentImageIndex++;
-                        if (currentImageIndex >= countUris) {
-                            currentImageIndex = 0;
-                        }
-                    } else {
-                        int delay = getDelaySeconds(context);
-                        while (nextUpdate <= 0) {
-                            currentImageIndex++;
-                            if (currentImageIndex >= countUris) {
-                                currentImageIndex = 0;
-                            }
-                            nextUpdate += delay;
-                        }
-                    }
+                currentImageIndex++;
+                if (currentImageIndex >= countUris) {
+                    currentImageIndex = 0;
                 }
             }
 

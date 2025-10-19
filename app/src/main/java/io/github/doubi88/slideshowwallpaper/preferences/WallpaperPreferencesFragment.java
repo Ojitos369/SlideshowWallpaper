@@ -54,6 +54,18 @@ public class WallpaperPreferencesFragment extends PreferenceFragmentCompat {
             // A click on a preference can only occur in a valid context
             Context ctx = getContext();
             if (ctx != null) {
+                SharedPreferencesManager manager = new SharedPreferencesManager(getPreferenceManager().getSharedPreferences());
+                if (manager.getImageUrisCount() == 0) {
+                    new AlertDialog.Builder(ctx)
+                            .setTitle(R.string.error_title)
+                            .setMessage(R.string.no_images_selected_text)
+                            .setIcon(android.R.drawable.ic_dialog_alert)
+                            .setNeutralButton(android.R.string.ok, (DialogInterface dialogInterface, int i) -> {
+                            })
+                            .show();
+                    return true;
+                }
+
                 Intent intent = new Intent(
                         WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER);
                 intent.putExtra(WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
@@ -65,7 +77,8 @@ public class WallpaperPreferencesFragment extends PreferenceFragmentCompat {
                             .setTitle(R.string.error_title)
                             .setMessage(R.string.no_wallpaper_activity_text)
                             .setIcon(android.R.drawable.ic_dialog_alert)
-                            .setNeutralButton(android.R.string.ok, (DialogInterface dialogInterface, int i) -> {})
+                            .setNeutralButton(android.R.string.ok, (DialogInterface dialogInterface, int i) -> {
+                            })
                             .show();
                 }
                 return true;

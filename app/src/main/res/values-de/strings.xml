@@ -79,4 +79,5 @@
         <item>7 Tage</item>
     </string-array>
     <string name="remove_image">Bild(er) entfernen</string>
+    <string name="no_images_selected_text">Bitte wähle mindestens ein Bild aus, bevor du das Hintergrundbild festlegst.</string>
 </resources>

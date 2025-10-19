@@ -157,7 +157,11 @@ public class ImageLoader {
         InputStream inputStream = null;
         try {
             inputStream = context.getContentResolver().openInputStream(uri);
-            result = new ExifInterface(inputStream).getRotationDegrees();
+            if (inputStream != null) {
+                result = new ExifInterface(inputStream).getRotationDegrees();
+            }
+        } catch (SecurityException e) {
+            Log.e(ImageLoader.class.getSimpleName(), "Failed to get rotation degrees", e);
         } finally {
             if (inputStream != null) {
                 inputStream.close();

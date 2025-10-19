@@ -81,4 +81,5 @@
         <item>7 días</item>
     </string-array>
     <string name="remove_image">Eliminar imagen(es)</string>
+    <string name="no_images_selected_text">Por favor, selecciona al menos una imagen antes de establecer el fondo de pantalla.</string>
 </resources>
