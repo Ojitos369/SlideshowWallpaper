@@ -39,6 +39,7 @@ import android.content.pm.ResolveInfo;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.PickVisualMediaRequest;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.appcompat.app.AppCompatActivity;
@@ -87,6 +88,10 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) {
+            originalUri = savedInstanceState.getParcelable("originalUri");
+            Log.d("CROP_DEBUG", "onCreate: Restored originalUri: " + (originalUri != null ? originalUri.toString() : "null"));
+        }
         setContentView(R.layout.image_list);
 
         this.removeButton = findViewById(R.id.delete_button);
@@ -125,20 +130,31 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         });
         recyclerView.setAdapter(imageListAdapter);
 
+        // Handle incoming share intent
+        Intent intent = getIntent();
+        String action = intent.getAction();
+        String type = intent.getType();
+
+        if ((Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) && type != null) {
+            if (type.startsWith("image/")) {
+                handleSharedImages(intent);
+            }
+        }
+
         findViewById(R.id.add_button).setOnClickListener(view -> {
-            Intent intent = new Intent();
-            intent.setType("image/*");
-            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            Intent intentFile = new Intent();
+            intentFile.setType("image/*");
+            intentFile.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                intentFile.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             }
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intentFile.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                intent.setAction(Intent.ACTION_OPEN_DOCUMENT);
+                intentFile.setAction(Intent.ACTION_OPEN_DOCUMENT);
             } else {
-                intent.setAction(Intent.ACTION_GET_CONTENT);
+                intentFile.setAction(Intent.ACTION_GET_CONTENT);
             }
-            startActivityForResult(intent, REQUEST_CODE_FILE);
+            startActivityForResult(intentFile, REQUEST_CODE_FILE);
         });
 
         this.removeButton.setOnClickListener(view -> {
@@ -189,6 +205,93 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     }
 
     @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        if (originalUri != null) {
+            outState.putParcelable("originalUri", originalUri);
+            Log.d("CROP_DEBUG", "onSaveInstanceState: Saving originalUri: " + originalUri.toString());
+        }
+    }
+
+    private void handleSharedImages(Intent intent) {
+        ArrayList<Uri> imageUris = new ArrayList<>();
+        String action = intent.getAction();
+
+        if (Intent.ACTION_SEND.equals(action)) {
+            Uri imageUri = (Uri) intent.getParcelableExtra(Intent.EXTRA_STREAM);
+            if (imageUri != null) {
+                imageUris.add(imageUri);
+            }
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            ArrayList<Uri> sharedUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+            if (sharedUris != null) {
+                imageUris.addAll(sharedUris);
+            }
+        }
+
+        List<Uri> urisToAdd = new ArrayList<>();
+        for (Uri uri : imageUris) {
+            boolean takePermissionSuccess = takePermission(uri);
+            if (takePermissionSuccess) {
+                if (manager.addUri(uri)) {
+                    urisToAdd.add(uri);
+                }
+            } else {
+                // If we can't get a persistent permission, copy the image to our own storage.
+                Uri newUri = copySharedImageToMediaStore(uri);
+                if (newUri != null && manager.addUri(newUri)) {
+                    urisToAdd.add(newUri);
+                }
+            }
+        }
+
+        if (!urisToAdd.isEmpty()) {
+            imageListAdapter.addUris(urisToAdd);
+        }
+    }
+
+    private Uri copySharedImageToMediaStore(Uri inputUri) {
+        ContentResolver resolver = getContentResolver();
+        String fileName = "sharedImage" + System.currentTimeMillis() + ".jpg";
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
+        contentValues.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentValues.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/SlideshowWallpaper");
+            contentValues.put(MediaStore.Images.Media.IS_PENDING, 1);
+        }
+
+        Uri collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        Uri imageUri = resolver.insert(collection, contentValues);
+
+        if (imageUri != null) {
+            try (OutputStream os = resolver.openOutputStream(imageUri);
+                 InputStream is = resolver.openInputStream(inputUri)) {
+                if (os != null && is != null) {
+                    byte[] buffer = new byte[1024];
+                    int len;
+                    while ((len = is.read(buffer)) != -1) {
+                        os.write(buffer, 0, len);
+                    }
+                }
+            } catch (IOException | SecurityException e) {
+                Log.e(ImageListActivity.class.getSimpleName(), "Failed to copy shared image to MediaStore", e);
+                resolver.delete(imageUri, null, null);
+                return null;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentValues.clear();
+                contentValues.put(MediaStore.Images.Media.IS_PENDING, 0);
+                resolver.update(imageUri, contentValues, null, null);
+            }
+        }
+
+        return imageUri;
+    }
+
+
+    @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
             finish();
@@ -211,28 +314,40 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (resultCode == RESULT_OK && requestCode == UCrop.REQUEST_CROP) {
-            final Uri resultUri = UCrop.getOutput(data);
-            if (originalUri != null && resultUri != null) {
-                Uri newUri = saveImageToMediaStore(resultUri);
-                if (newUri != null) {
-                    // Replace the original URI with the new cropped URI
-                    manager.removeUri(originalUri);
-                    manager.addUri(newUri);
 
-                    // Update the adapter
-                    imageListAdapter.replaceUri(originalUri, newUri);
+        if (requestCode == UCrop.REQUEST_CROP) {
+            Log.d("CROP_DEBUG", "onActivityResult: Crop request finished with result code: " + resultCode);
+            if (resultCode == RESULT_OK) {
+                final Uri resultUri = UCrop.getOutput(data);
+                Log.d("CROP_DEBUG", "onActivityResult: Crop successful. Original URI: " + (originalUri != null ? originalUri.toString() : "null") + ", Result URI: " + (resultUri != null ? resultUri.toString() : "null"));
+                if (originalUri != null && resultUri != null) {
+                    Uri newUri = saveImageToMediaStore(resultUri);
+                    if (newUri != null) {
+                        // Replace the original URI with the new cropped URI
+                        manager.removeUri(originalUri);
+                        manager.addUri(newUri);
 
-                    // Release permission for the original URI if it's no longer needed
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && !manager.hasImageUri(originalUri)) {
-                        getContentResolver().releasePersistableUriPermission(originalUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        // Update the adapter
+                        imageListAdapter.replaceUri(originalUri, newUri);
+
+                        // Release permission for the original URI if it's no longer needed
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && !manager.hasImageUri(originalUri)) {
+                            try {
+                                getContentResolver().releasePersistableUriPermission(originalUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                Log.d("CROP_DEBUG", "onActivityResult: Successfully released permission for " + originalUri.toString());
+                            } catch (SecurityException e) {
+                                Log.e("CROP_DEBUG", "onActivityResult: Failed to release permission for " + originalUri.toString(), e);
+                            }
+                        }
                     }
                 }
+                originalUri = null;
+            } else if (resultCode == UCrop.RESULT_ERROR) {
+                final Throwable cropError = UCrop.getError(data);
+                Log.e("CROP_DEBUG", "onActivityResult: Crop error", cropError);
+            } else {
+                Log.d("CROP_DEBUG", "onActivityResult: Crop was cancelled.");
             }
-            originalUri = null;
-        } else if (resultCode == UCrop.RESULT_ERROR) {
-            final Throwable cropError = UCrop.getError(data);
-            Log.e(ImageListActivity.class.getSimpleName(), "Crop error: " + cropError);
         }
 
         List<Uri> uris = new LinkedList<>();
@@ -264,12 +379,17 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     private boolean takePermission(Uri uri) {
         boolean takePermissionSuccess = true;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            ContentResolver res = getContentResolver();
-            int perms = res.getPersistedUriPermissions().size();
-            res.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try {
+                ContentResolver res = getContentResolver();
+                int perms = res.getPersistedUriPermissions().size();
+                res.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
-            // If taking the permission was unsuccessful (e.g. because the limit was reached), Don't add the uri
-            if (res.getPersistedUriPermissions().size() <= perms) {
+                // If taking the permission was unsuccessful (e.g. because the limit was reached), Don't add the uri
+                if (res.getPersistedUriPermissions().size() <= perms) {
+                    takePermissionSuccess = false;
+                }
+            } catch (SecurityException e) {
+                Log.e(ImageListActivity.class.getSimpleName(), "Failed to take persistable URI permission", e);
                 takePermissionSuccess = false;
             }
         }
@@ -319,13 +439,23 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
     @Override
     public void onCrop(Uri uri) {
+        Log.d("CROP_DEBUG", "onCrop: Cropping image with uri: " + uri.toString());
         this.originalUri = uri;
         UCrop.Options options = new UCrop.Options();
 
-        android.util.DisplayMetrics displayMetrics = new android.util.DisplayMetrics();
-        getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
-        int height = displayMetrics.heightPixels;
-        int width = displayMetrics.widthPixels;
+        int height, width;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.view.WindowMetrics windowMetrics = getWindowManager().getCurrentWindowMetrics();
+            android.graphics.Insets insets = windowMetrics.getWindowInsets()
+                    .getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars());
+            width = windowMetrics.getBounds().width() - insets.left - insets.right;
+            height = windowMetrics.getBounds().height() - insets.top - insets.bottom;
+        } else {
+            android.util.DisplayMetrics displayMetrics = new android.util.DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
+            height = displayMetrics.heightPixels;
+            width = displayMetrics.widthPixels;
+        }
 
         options.setAspectRatioOptions(0, new com.yalantis.ucrop.model.AspectRatio("auto", width, height),
                 new com.yalantis.ucrop.model.AspectRatio("9:16", 9, 16),
@@ -343,6 +473,7 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         Uri destinationUri = Uri.fromFile(destinationFile);
 
         UCrop uCrop = UCrop.of(uri, destinationUri)
+                .withMaxResultSize(1920, 1920)
                 .withOptions(options);
 
         Intent intent = uCrop.getIntent(this);
