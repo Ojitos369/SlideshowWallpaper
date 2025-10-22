@@ -24,6 +24,7 @@ import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
@@ -97,6 +98,35 @@ public class ImageLoader {
      */
     @NonNull
     public static ImageInfo loadImage(@NonNull Uri uri, @NonNull Context context, int desiredWidth, int desiredHeight, boolean considerMemory) throws IOException {
+        String mimeType = context.getContentResolver().getType(uri);
+        if (mimeType != null && mimeType.startsWith("video/")) {
+            return loadVideoThumbnail(uri, context);
+        } else {
+            return loadImageBitmap(uri, context, desiredWidth, desiredHeight, considerMemory);
+        }
+    }
+
+    private static ImageInfo loadVideoThumbnail(@NonNull Uri uri, @NonNull Context context) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(context, uri);
+            Bitmap bitmap = retriever.getFrameAtTime();
+            ImageInfo info = loadFileNameAndSize(uri, context);
+            return new ImageInfo(uri, info.getName(), info.getSize(), bitmap);
+        } catch (Exception e) {
+            Log.e(ImageLoader.class.getSimpleName(), "Failed to load video thumbnail", e);
+            return new ImageInfo(uri, "Error loading video", 0, null);
+        } finally {
+            try {
+                retriever.release();
+            } catch (IOException e) {
+                Log.e(ImageLoader.class.getSimpleName(), "Failed to release MediaMetadataRetriever", e);
+            }
+        }
+    }
+
+    @NonNull
+    private static ImageInfo loadImageBitmap(@NonNull Uri uri, @NonNull Context context, int desiredWidth, int desiredHeight, boolean considerMemory) throws IOException {
         Bitmap bitmap = null;
         ImageInfo info = null;
         InputStream in = null;

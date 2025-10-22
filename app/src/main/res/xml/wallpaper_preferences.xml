@@ -52,6 +52,12 @@
     </PreferenceCategory>
 
     <SwitchPreferenceCompat
+        android:key="@string/preference_mute_videos_key"
+        android:title="@string/preference_mute_videos"
+        android:defaultValue="true"
+        app:icon="@drawable/baseline_volume_off_24"/>
+
+    <SwitchPreferenceCompat
         android:key="@string/preference_swipe_key"
         android:title="@string/preference_swipe"
         android:defaultValue="true"

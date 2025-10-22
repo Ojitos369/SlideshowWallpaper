@@ -51,6 +51,10 @@
     <string name="cancel_action_text">Cancel</string>
     <string name="preference_info">Info</string>
     <string name="preference_info_summary">Display information about this app</string>
+
+    <string name="preference_mute_videos">Mute videos</string>
+    <string name="preference_mute_videos_key" translatable="false">mute_videos</string>
+
     <string name="info_version_caption">Version</string>
     <string name="info_author_caption">Author</string>
     <string name="info_license_caption">License</string>

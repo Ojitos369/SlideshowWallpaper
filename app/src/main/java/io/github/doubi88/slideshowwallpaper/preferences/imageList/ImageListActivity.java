@@ -133,17 +133,14 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         // Handle incoming share intent
         Intent intent = getIntent();
         String action = intent.getAction();
-        String type = intent.getType();
-
-        if ((Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) && type != null) {
-            if (type.startsWith("image/")) {
-                handleSharedImages(intent);
-            }
+        if (Intent.ACTION_SEND.equals(action) || Intent.ACTION_SEND_MULTIPLE.equals(action)) {
+            handleSharedImages(intent);
         }
 
         findViewById(R.id.add_button).setOnClickListener(view -> {
             Intent intentFile = new Intent();
-            intentFile.setType("image/*");
+            intentFile.setType("*/*");
+            intentFile.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
             intentFile.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                 intentFile.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
@@ -172,9 +169,15 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
                         if ("content".equals(uri.getScheme())) {
                             try {
-                                getContentResolver().delete(uri, null, null);
+                                // Check if it's a video or image to use the correct deletion method
+                                String mimeType = getContentResolver().getType(uri);
+                                if (mimeType != null && mimeType.startsWith("video/")) {
+                                    getContentResolver().delete(uri, null, null);
+                                } else {
+                                    getContentResolver().delete(uri, null, null);
+                                }
                             } catch (SecurityException e) {
-                                Log.e(ImageListActivity.class.getSimpleName(), "Failed to delete image from MediaStore", e);
+                                Log.e(ImageListActivity.class.getSimpleName(), "Failed to delete media from MediaStore", e);
                             }
                         }
 
@@ -217,27 +220,16 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         ArrayList<Uri> imageUris = new ArrayList<>();
         String action = intent.getAction();
 
-        if (Intent.ACTION_SEND.equals(action)) {
-            Uri imageUri = (Uri) intent.getParcelableExtra(Intent.EXTRA_STREAM);
-            if (imageUri != null) {
-                imageUris.add(imageUri);
-            }
-        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)) {
-            ArrayList<Uri> sharedUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-            if (sharedUris != null) {
-                imageUris.addAll(sharedUris);
-            }
+        if (Intent.ACTION_SEND.equals(action) && intent.getParcelableExtra(Intent.EXTRA_STREAM) != null) {
+            imageUris.add(intent.getParcelableExtra(Intent.EXTRA_STREAM));
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action) && intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM) != null) {
+            imageUris.addAll(intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM));
         }
 
         List<Uri> urisToAdd = new ArrayList<>();
         for (Uri uri : imageUris) {
-            boolean takePermissionSuccess = takePermission(uri);
-            if (takePermissionSuccess) {
-                if (manager.addUri(uri)) {
-                    urisToAdd.add(uri);
-                }
-            } else {
-                // If we can't get a persistent permission, copy the image to our own storage.
+            String mimeType = getContentResolver().getType(uri);
+            if (mimeType != null && (mimeType.startsWith("image/") || mimeType.startsWith("video/"))) {
                 Uri newUri = copySharedImageToMediaStore(uri);
                 if (newUri != null && manager.addUri(newUri)) {
                     urisToAdd.add(newUri);
@@ -252,20 +244,36 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
     private Uri copySharedImageToMediaStore(Uri inputUri) {
         ContentResolver resolver = getContentResolver();
-        String fileName = "sharedImage" + System.currentTimeMillis() + ".jpg";
+        String mimeType = resolver.getType(inputUri);
+        String fileExtension = mimeType != null && mimeType.startsWith("video/") ? ".mp4" : ".jpg";
+        String fileName = "sharedMedia" + System.currentTimeMillis() + fileExtension;
+
         ContentValues contentValues = new ContentValues();
-        contentValues.put(MediaStore.Images.Media.DISPLAY_NAME, fileName);
-        contentValues.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+
+        Uri collection;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            contentValues.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/SlideshowWallpaper");
-            contentValues.put(MediaStore.Images.Media.IS_PENDING, 1);
+            if (mimeType != null && mimeType.startsWith("video/")) {
+                contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, "Movies/SlideshowWallpaper");
+                collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            } else {
+                contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, "Pictures/SlideshowWallpaper");
+                collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            }
+            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 1);
+        } else {
+            if (mimeType != null && mimeType.startsWith("video/")) {
+                collection = MediaStore.Video.Media.EXTERNAL_CONTENT_URI;
+            } else {
+                collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI;
+            }
         }
 
-        Uri collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
-        Uri imageUri = resolver.insert(collection, contentValues);
+        Uri mediaUri = resolver.insert(collection, contentValues);
 
-        if (imageUri != null) {
-            try (OutputStream os = resolver.openOutputStream(imageUri);
+        if (mediaUri != null) {
+            try (OutputStream os = resolver.openOutputStream(mediaUri);
                  InputStream is = resolver.openInputStream(inputUri)) {
                 if (os != null && is != null) {
                     byte[] buffer = new byte[1024];
@@ -275,19 +283,19 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
                     }
                 }
             } catch (IOException | SecurityException e) {
-                Log.e(ImageListActivity.class.getSimpleName(), "Failed to copy shared image to MediaStore", e);
-                resolver.delete(imageUri, null, null);
+                Log.e(ImageListActivity.class.getSimpleName(), "Failed to copy shared media to MediaStore", e);
+                resolver.delete(mediaUri, null, null);
                 return null;
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 contentValues.clear();
-                contentValues.put(MediaStore.Images.Media.IS_PENDING, 0);
-                resolver.update(imageUri, contentValues, null, null);
+                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                resolver.update(mediaUri, contentValues, null, null);
             }
         }
 
-        return imageUri;
+        return mediaUri;
     }
 
 
@@ -302,9 +310,9 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     private void imagePickerCallback(List<Uri> uris) {
         List<Uri> urisToAdd = new ArrayList<>(uris.size());
         for (Uri uri : uris) {
-            boolean takePermissionSuccess = takePermission(uri);
-            if (takePermissionSuccess && manager.addUri(uri)) {
-                urisToAdd.add(uri);
+            Uri newUri = copySharedImageToMediaStore(uri);
+            if (newUri != null && manager.addUri(newUri)) {
+                urisToAdd.add(newUri);
             }
         }
         imageListAdapter.addUris(urisToAdd);
@@ -352,48 +360,27 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
         List<Uri> uris = new LinkedList<>();
         if (requestCode == REQUEST_CODE_FILE && resultCode == Activity.RESULT_OK) {
-            ClipData clipData = data.getClipData();
-            if (clipData == null) {
-                Uri uri = data.getData();
-                if (uri != null) {
-                    boolean takePermissionSuccess = takePermission(uri);
-                    if (takePermissionSuccess && manager.addUri(uri)) {
-                        uris.add(uri);
+            if (data != null) {
+                ArrayList<Uri> resultUris = new ArrayList<>();
+                if (data.getClipData() != null) {
+                    ClipData clipData = data.getClipData();
+                    for (int i = 0; i < clipData.getItemCount(); i++) {
+                        resultUris.add(clipData.getItemAt(i).getUri());
                     }
+                } else if (data.getData() != null) {
+                    resultUris.add(data.getData());
                 }
-            }
-            else {
-                for (int index = 0; index < clipData.getItemCount(); index++) {
-                    Uri uri = clipData.getItemAt(index).getUri();
-                    boolean takePermissionSuccess = takePermission(uri);
-                    if (takePermissionSuccess && manager.addUri(uri)) {
-                        uris.add(uri);
+
+                for (Uri uri : resultUris) {
+                    Uri newUri = copySharedImageToMediaStore(uri);
+                    if (newUri != null && manager.addUri(newUri)) {
+                        uris.add(newUri);
                     }
                 }
             }
 
             imageListAdapter.addUris(uris);
         }
-    }
-
-    private boolean takePermission(Uri uri) {
-        boolean takePermissionSuccess = true;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            try {
-                ContentResolver res = getContentResolver();
-                int perms = res.getPersistedUriPermissions().size();
-                res.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-
-                // If taking the permission was unsuccessful (e.g. because the limit was reached), Don't add the uri
-                if (res.getPersistedUriPermissions().size() <= perms) {
-                    takePermissionSuccess = false;
-                }
-            } catch (SecurityException e) {
-                Log.e(ImageListActivity.class.getSimpleName(), "Failed to take persistable URI permission", e);
-                takePermissionSuccess = false;
-            }
-        }
-        return takePermissionSuccess;
     }
 
     private Uri saveImageToMediaStore(Uri inputUri) {

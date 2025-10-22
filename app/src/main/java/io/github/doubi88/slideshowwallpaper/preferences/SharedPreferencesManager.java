@@ -41,6 +41,8 @@ public class SharedPreferencesManager {
     private static final String PREFERENCE_KEY_ANTI_ALIAS = "anti_alias";
     private static final String PREFERENCE_KEY_ANTI_ALIAS_WHILE_SCROLLING = "anti_alias_scrolling";
     private static final String PREFERENCE_KEY_SWIPE = "swipe";
+    private static final String PREFERENCE_KEY_MUTE_VIDEOS = "mute_videos";
+
 
     public enum Ordering {
         SELECTION(0, PREFERENCE_KEY_URI_LIST) {
@@ -267,5 +269,9 @@ public class SharedPreferencesManager {
 
     public boolean getSwipeToChange() {
         return preferences.getBoolean(PREFERENCE_KEY_SWIPE, true);
+    }
+
+    public boolean getMuteVideos() {
+        return preferences.getBoolean(PREFERENCE_KEY_MUTE_VIDEOS, true);
     }
 }
