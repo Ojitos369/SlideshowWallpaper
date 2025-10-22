@@ -321,7 +321,14 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     public void onCrop(Uri uri) {
         this.originalUri = uri;
         UCrop.Options options = new UCrop.Options();
-        options.setAspectRatioOptions(0, new com.yalantis.ucrop.model.AspectRatio("9:16", 9, 16),
+
+        android.util.DisplayMetrics displayMetrics = new android.util.DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getMetrics(displayMetrics);
+        int height = displayMetrics.heightPixels;
+        int width = displayMetrics.widthPixels;
+
+        options.setAspectRatioOptions(0, new com.yalantis.ucrop.model.AspectRatio("auto", width, height),
+                new com.yalantis.ucrop.model.AspectRatio("9:16", 9, 16),
                 new com.yalantis.ucrop.model.AspectRatio("16:9", 16, 9),
                 new com.yalantis.ucrop.model.AspectRatio("4:3", 4, 3),
                 new com.yalantis.ucrop.model.AspectRatio("3:4", 3, 4),
