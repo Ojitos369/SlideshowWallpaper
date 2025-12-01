@@ -22,11 +22,17 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.SurfaceTexture;
+import android.media.AudioManager;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.os.ParcelFileDescriptor;
 import android.view.Surface;
+import android.util.Log;
+import java.io.IOException;
 
 public class MediaInfo {
+    private static final String TAG = "MediaInfo";
+
     public enum MediaType {
         IMAGE,
         VIDEO
@@ -73,32 +79,97 @@ public class MediaInfo {
         return type;
     }
 
-    public void prepareVideo(Context context, MediaPlayer.OnCompletionListener onCompletionListener) {
+    public void prepareVideoAsync(Context context, android.view.SurfaceHolder holder,
+            MediaPlayer.OnCompletionListener onCompletionListener, MediaPlayer.OnErrorListener onErrorListener,
+            MediaPlayer.OnPreparedListener onPreparedListener) {
         if (type == MediaType.VIDEO) {
-            try {
-                if (mediaPlayer != null) {
-                    mediaPlayer.release();
+            Log.d(TAG, "prepareVideoAsync: " + uri);
+            if (holder == null || !holder.getSurface().isValid()) {
+                Log.e(TAG, "Surface is not valid");
+                if (onErrorListener != null) {
+                    onErrorListener.onError(null, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0);
                 }
-                mediaPlayer = new MediaPlayer();
-                mediaPlayer.setDataSource(context, uri);
-                
-                // Create surface texture for video playback
-                if (surfaceTexture != null) {
-                    surfaceTexture.release();
-                }
-                if (surface != null) {
-                    surface.release();
-                }
-                
-                surfaceTexture = new SurfaceTexture(0);
-                surface = new Surface(surfaceTexture);
-                mediaPlayer.setSurface(surface);
-                
-                mediaPlayer.setOnCompletionListener(onCompletionListener);
-                mediaPlayer.prepare();
-            } catch (Exception e) {
-                e.printStackTrace();
+                return;
             }
+            ParcelFileDescriptor pfd = null;
+            try {
+                if (mediaPlayer == null) {
+                    mediaPlayer = new MediaPlayer();
+                    Log.d(TAG, "MediaPlayer created");
+                } else {
+                    mediaPlayer.reset();
+                    Log.d(TAG, "MediaPlayer reset");
+                }
+
+                mediaPlayer.setSurface(holder.getSurface());
+                Log.d(TAG, "setSurface done");
+
+                pfd = context.getContentResolver().openFileDescriptor(uri, "r");
+                if (pfd != null) {
+                    long size = pfd.getStatSize();
+                    if (size > 0) {
+                        mediaPlayer.setDataSource(pfd.getFileDescriptor(), 0, size);
+                        Log.d(TAG, "setDataSource with size: " + size);
+                    } else {
+                        mediaPlayer.setDataSource(pfd.getFileDescriptor());
+                        Log.d(TAG, "setDataSource without size");
+                    }
+                } else {
+                    throw new IOException("FileDescriptor is null");
+                }
+
+                final ParcelFileDescriptor finalPfd = pfd;
+
+                mediaPlayer.setOnCompletionListener(mp -> {
+                    Log.d(TAG, "Video completed: " + uri);
+                    if (onCompletionListener != null)
+                        onCompletionListener.onCompletion(mp);
+                });
+                mediaPlayer.setOnErrorListener((mp, what, extra) -> {
+                    Log.e(TAG, "Video error: " + what + ", " + extra);
+                    try {
+                        if (finalPfd != null)
+                            finalPfd.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    if (onErrorListener != null)
+                        return onErrorListener.onError(mp, what, extra);
+                    return false;
+                });
+                mediaPlayer.setOnPreparedListener(mp -> {
+                    Log.d(TAG, "Video prepared: " + uri);
+                    try {
+                        if (finalPfd != null)
+                            finalPfd.close();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    if (onPreparedListener != null)
+                        onPreparedListener.onPrepared(mp);
+                });
+                mediaPlayer.prepareAsync();
+            } catch (Exception e) {
+                Log.e(TAG, "Error preparing video", e);
+                e.printStackTrace();
+                try {
+                    if (pfd != null)
+                        pfd.close();
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+                if (onErrorListener != null) {
+                    onErrorListener.onError(mediaPlayer, MediaPlayer.MEDIA_ERROR_UNKNOWN, 0);
+                }
+            }
+        }
+    }
+
+    public boolean isVideoPlaying() {
+        try {
+            return type == MediaType.VIDEO && mediaPlayer != null && mediaPlayer.isPlaying();
+        } catch (Exception e) {
+            return false;
         }
     }
 

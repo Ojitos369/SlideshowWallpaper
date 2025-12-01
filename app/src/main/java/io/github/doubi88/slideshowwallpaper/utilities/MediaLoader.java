@@ -30,7 +30,8 @@ import java.io.InputStream;
 public class MediaLoader {
     private static final String TAG = "MediaLoader";
 
-    public static MediaInfo loadMedia(Uri uri, Context context, int targetWidth, int targetHeight, MediaInfo.MediaType type) throws IOException {
+    public static MediaInfo loadMedia(Uri uri, Context context, int targetWidth, int targetHeight,
+            MediaInfo.MediaType type) throws IOException {
         String fileName = FileUtils.getFileName(uri, context);
         Bitmap bitmap = null;
 
@@ -39,10 +40,20 @@ public class MediaLoader {
         } else if (type == MediaInfo.MediaType.VIDEO) {
             // For videos, we'll get a thumbnail
             MediaMetadataRetriever retriever = new MediaMetadataRetriever();
-            retriever.setDataSource(context, uri);
-            bitmap = retriever.getFrameAtTime();
-            if (bitmap != null) {
-                bitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
+            try {
+                retriever.setDataSource(context, uri);
+                bitmap = retriever.getFrameAtTime();
+                if (bitmap != null) {
+                    bitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                try {
+                    retriever.release();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
             }
         }
 

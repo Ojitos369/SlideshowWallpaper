@@ -27,7 +27,10 @@ import android.util.Log;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Timer;
+import java.util.Timer;
 import java.util.TimerTask;
+import android.os.Handler;
+import android.os.Looper;
 
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager;
 
@@ -41,6 +44,9 @@ public class CurrentMediaHandler {
     private int width;
     private int height;
     private Context context;
+    private android.view.SurfaceHolder surfaceHolder;
+    private final Object lock = new Object();
+    private Handler mainHandler;
 
     private boolean runnable;
     private boolean isPaused;
@@ -48,16 +54,20 @@ public class CurrentMediaHandler {
     private Timer currentTimer;
     private ArrayList<NextMediaListener> nextMediaListeners;
     private MediaPlayer.OnCompletionListener videoCompletionListener;
+    private MediaPlayer.OnErrorListener videoErrorListener;
 
     public interface NextMediaListener {
         void nextMedia(MediaInfo media);
     }
 
-    public CurrentMediaHandler(SharedPreferencesManager manager, int width, int height, Context context) {
+    public CurrentMediaHandler(SharedPreferencesManager manager, int width, int height, Context context,
+            android.view.SurfaceHolder surfaceHolder) {
         this.manager = manager;
         this.width = width;
         this.height = height;
         this.context = context;
+        this.surfaceHolder = surfaceHolder;
+        this.mainHandler = new Handler(Looper.getMainLooper());
         this.runnable = true;
         this.isPaused = false;
         nextMediaListeners = new ArrayList<>(1);
@@ -67,6 +77,15 @@ public class CurrentMediaHandler {
             if (runnable && !isPaused) {
                 forceNextMedia(context);
             }
+        };
+
+        // Initialize video error listener
+        videoErrorListener = (mp, what, extra) -> {
+            Log.e(TAG, "Video error: " + what + ", " + extra);
+            if (runnable && !isPaused) {
+                forceNextMedia(context);
+            }
+            return true;
         };
     }
 
@@ -157,28 +176,30 @@ public class CurrentMediaHandler {
     }
 
     public void forceNextMedia(Context context) {
-        if (runnable) {
-            if (currentMedia != null) {
-                currentMedia.release();
+        synchronized (lock) {
+            if (runnable) {
+                // Do not release currentMedia here, let the background thread handle it
+                // to avoid race conditions with swiping
+                if (currentTimer != null) {
+                    currentTimer.cancel();
+                }
+                currentTimer = new Timer("CurrentMediaHandlerTimer");
+                currentTimer.schedule(new Runner(context, Direction.NEXT, true), 0);
             }
-            if (currentTimer != null) {
-                currentTimer.cancel();
-            }
-            currentTimer = new Timer("CurrentMediaHandlerTimer");
-            currentTimer.schedule(new Runner(context, Direction.NEXT, true), 0);
         }
     }
 
     public void forcePreviousMedia(Context context) {
-        if (runnable) {
-            if (currentMedia != null) {
-                currentMedia.release();
+        synchronized (lock) {
+            if (runnable) {
+                // Do not release currentMedia here, let the background thread handle it
+                // to avoid race conditions with swiping
+                if (currentTimer != null) {
+                    currentTimer.cancel();
+                }
+                currentTimer = new Timer("CurrentMediaHandlerTimer");
+                currentTimer.schedule(new Runner(context, Direction.PREVIOUS, true), 0);
             }
-            if (currentTimer != null) {
-                currentTimer.cancel();
-            }
-            currentTimer = new Timer("CurrentMediaHandlerTimer");
-            currentTimer.schedule(new Runner(context, Direction.PREVIOUS, true), 0);
         }
     }
 
@@ -219,28 +240,48 @@ public class CurrentMediaHandler {
     }
 
     private boolean loadNewMedia(Context context, Direction direction, boolean isForced) throws IOException {
-        Uri uri = getNextUri(context, direction, isForced);
-        boolean result = false;
-        if (uri != null) {
-            if (currentMedia == null || !uri.equals(currentMedia.getUri())) {
-                if (currentMedia != null) {
-                    currentMedia.release();
-                }
+        synchronized (lock) {
+            Uri uri = getNextUri(context, direction, isForced);
+            boolean result = false;
+            if (uri != null) {
+                if (currentMedia == null || !uri.equals(currentMedia.getUri()) || currentMedia.isVideo()) {
+                    final MediaInfo oldMedia = currentMedia;
 
-                // Determine media type and load accordingly
-                MediaInfo.MediaType type = MediaInfo.determineType(context, uri);
-                currentMedia = MediaLoader.loadMedia(uri, context, width, height, type);
-                
-                if (currentMedia.isVideo()) {
-                    currentMedia.prepareVideo(context, videoCompletionListener);
-                    if (!isPaused) {
-                        currentMedia.startVideo();
+                    // Determine media type and load accordingly
+                    MediaInfo.MediaType type = MediaInfo.determineType(context, uri);
+                    final MediaInfo newMedia = MediaLoader.loadMedia(uri, context, width, height, type);
+                    currentMedia = newMedia;
+
+                    if (newMedia.isVideo()) {
+                        Log.d(TAG, "Loading video: " + uri);
+                    } else {
+                        Log.d(TAG, "Loading image: " + uri);
                     }
+
+                    mainHandler.post(() -> {
+                        if (oldMedia != null) {
+                            oldMedia.release();
+                        }
+                    });
+
+                    if (newMedia.isVideo()) {
+                        mainHandler.post(() -> {
+                            if (currentMedia == newMedia) { // Check if media hasn't changed during delay
+                                newMedia.prepareVideoAsync(context, surfaceHolder, videoCompletionListener,
+                                        videoErrorListener, mp -> {
+                                            Log.d(TAG, "Video prepared: " + uri);
+                                            if (!isPaused) {
+                                                newMedia.startVideo();
+                                            }
+                                        });
+                            }
+                        });
+                    }
+                    result = true;
                 }
-                result = true;
             }
+            return result;
         }
-        return result;
     }
 
     private Uri getNextUri(Context context, Direction direction, boolean isForced) {

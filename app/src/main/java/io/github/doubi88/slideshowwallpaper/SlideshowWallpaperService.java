@@ -13,6 +13,7 @@ import android.service.wallpaper.WallpaperService;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
+import android.util.Log;
 
 import androidx.annotation.RequiresApi;
 
@@ -31,6 +32,7 @@ public class SlideshowWallpaperService extends WallpaperService {
     }
 
     private class SlideshowWallpaperEngine extends Engine {
+        private static final String TAG = "SlideshowWallpaperEngine";
         private final Handler handler = new Handler(Looper.getMainLooper());
         private CurrentMediaHandler currentMediaHandler;
         private int width = 0;
@@ -43,60 +45,73 @@ public class SlideshowWallpaperService extends WallpaperService {
         private boolean surfaceReady = false;
 
         SlideshowWallpaperEngine() {
-            SharedPreferences prefs = SlideshowWallpaperService.this.getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE);
+            SharedPreferences prefs = SlideshowWallpaperService.this
+                    .getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE);
             manager = new SharedPreferencesManager(prefs);
-            if (manager.getAntiAlias()) imagePaint.setAntiAlias(true);
+            if (manager.getAntiAlias())
+                imagePaint.setAntiAlias(true);
             initGestureDetector();
         }
 
         private void initGestureDetector() {
-            gestureDetector = new GestureDetector(getApplicationContext(), new GestureDetector.SimpleOnGestureListener() {
-                private static final int SWIPE_THRESHOLD_VELOCITY = 200;
+            gestureDetector = new GestureDetector(getApplicationContext(),
+                    new GestureDetector.SimpleOnGestureListener() {
+                        private static final int SWIPE_THRESHOLD_VELOCITY = 200;
 
-                @Override
-                public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
-                    if (manager.getSwipeToChange() && currentMediaHandler != null) {
-                        if (e1.getX() - e2.getX() > 50 && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
-                            currentMediaHandler.forceNextMedia(getApplicationContext());
-                            return true;
-                        } else if (e2.getX() - e1.getX() > 50 && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
-                            currentMediaHandler.forcePreviousMedia(getApplicationContext());
-                            return true;
+                        @Override
+                        public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                            if (manager.getSwipeToChange() && currentMediaHandler != null) {
+                                if (e1.getX() - e2.getX() > 50 && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
+                                    currentMediaHandler.forceNextMedia(getApplicationContext());
+                                    return true;
+                                } else if (e2.getX() - e1.getX() > 50
+                                        && Math.abs(velocityX) > SWIPE_THRESHOLD_VELOCITY) {
+                                    currentMediaHandler.forcePreviousMedia(getApplicationContext());
+                                    return true;
+                                }
+                            }
+                            return super.onFling(e1, e2, velocityX, velocityY);
                         }
-                    }
-                    return super.onFling(e1, e2, velocityX, velocityY);
-                }
 
-                @Override
-                public boolean onDoubleTap(MotionEvent e) {
-                    if (currentMediaHandler != null && currentMediaHandler.getCurrentMedia() != null
-                            && currentMediaHandler.getCurrentMedia().isVideo()) {
-                        if (currentMediaHandler.isPaused()) currentMediaHandler.resume(getApplicationContext());
-                        else currentMediaHandler.pause();
-                        return true;
-                    }
-                    return super.onDoubleTap(e);
-                }
-            });
+                        @Override
+                        public boolean onDoubleTap(MotionEvent e) {
+                            if (currentMediaHandler != null && currentMediaHandler.getCurrentMedia() != null
+                                    && currentMediaHandler.getCurrentMedia().isVideo()) {
+                                if (currentMediaHandler.isPaused())
+                                    currentMediaHandler.resume(getApplicationContext());
+                                else
+                                    currentMediaHandler.pause();
+                                return true;
+                            }
+                            return super.onDoubleTap(e);
+                        }
+                    });
         }
 
         @Override
         public void onTouchEvent(MotionEvent event) {
             super.onTouchEvent(event);
-            if (gestureDetector != null) gestureDetector.onTouchEvent(event);
+            if (gestureDetector != null)
+                gestureDetector.onTouchEvent(event);
         }
 
         @Override
         public void onSurfaceCreated(SurfaceHolder holder) {
             super.onSurfaceCreated(holder);
+            Log.d(TAG, "onSurfaceCreated");
             surfaceReady = true;
+            if (isVisible() && currentMediaHandler != null) {
+                currentMediaHandler.resume(getApplicationContext());
+            }
         }
 
         @Override
         public void onSurfaceDestroyed(SurfaceHolder holder) {
             super.onSurfaceDestroyed(holder);
+            Log.d(TAG, "onSurfaceDestroyed");
             surfaceReady = false;
-            if (currentMediaHandler != null) currentMediaHandler.stop();
+            if (currentMediaHandler != null)
+                currentMediaHandler.stop();
         }
 
         @Override
@@ -105,7 +120,8 @@ public class SlideshowWallpaperService extends WallpaperService {
             this.width = width;
             this.height = height;
             if (currentMediaHandler == null) {
-                currentMediaHandler = new CurrentMediaHandler(manager, width, height, getApplicationContext());
+                currentMediaHandler = new CurrentMediaHandler(manager, width, height, getApplicationContext(),
+                        getSurfaceHolder());
                 currentMediaHandler.addNextMediaListener(this::displayCurrentMedia);
                 currentMediaHandler.updateAfter(getApplicationContext(), 0);
             } else {
@@ -117,17 +133,24 @@ public class SlideshowWallpaperService extends WallpaperService {
         @Override
         public void onVisibilityChanged(boolean visible) {
             super.onVisibilityChanged(visible);
+            Log.d(TAG, "onVisibilityChanged: " + visible);
             if (currentMediaHandler != null) {
-                if (visible) currentMediaHandler.resume(getApplicationContext());
-                else currentMediaHandler.pause();
+                if (visible && surfaceReady)
+                    currentMediaHandler.resume(getApplicationContext());
+                else
+                    currentMediaHandler.pause();
             }
         }
 
         private void displayCurrentMedia(MediaInfo media) {
             handler.post(() -> {
-                if (!surfaceReady) return;
-                if (media != null && media.getImage() != null) drawImage(media);
-                else drawBlackScreen();
+                if (!surfaceReady)
+                    return;
+                if (media != null && media.getImage() != null) {
+                    if (!media.isVideo() || !media.isVideoPlaying())
+                        drawImage(media);
+                } else
+                    drawBlackScreen();
             });
         }
 
@@ -141,7 +164,8 @@ public class SlideshowWallpaperService extends WallpaperService {
             Canvas canvas = null;
             try {
                 canvas = holder.lockCanvas();
-                if (canvas == null) return;
+                if (canvas == null)
+                    return;
                 Bitmap bitmap = media.getImage();
                 canvas.drawColor(Color.BLACK);
                 float scaleX = (float) width / bitmap.getWidth();
@@ -156,9 +180,11 @@ public class SlideshowWallpaperService extends WallpaperService {
                 canvas.scale(scale, scale);
                 canvas.drawBitmap(bitmap, 0, 0, imagePaint);
                 canvas.restore();
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) notifyColorsChanged();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1)
+                    notifyColorsChanged();
             } finally {
-                if (canvas != null) holder.unlockCanvasAndPost(canvas);
+                if (canvas != null)
+                    holder.unlockCanvasAndPost(canvas);
             }
         }
 
@@ -167,9 +193,11 @@ public class SlideshowWallpaperService extends WallpaperService {
             Canvas canvas = null;
             try {
                 canvas = holder.lockCanvas();
-                if (canvas != null) canvas.drawColor(Color.BLACK);
+                if (canvas != null)
+                    canvas.drawColor(Color.BLACK);
             } finally {
-                if (canvas != null) holder.unlockCanvasAndPost(canvas);
+                if (canvas != null)
+                    holder.unlockCanvasAndPost(canvas);
             }
         }
 
@@ -188,11 +216,13 @@ public class SlideshowWallpaperService extends WallpaperService {
         @Override
         public void onDestroy() {
             super.onDestroy();
-            if (currentMediaHandler != null) currentMediaHandler.stop();
+            if (currentMediaHandler != null)
+                currentMediaHandler.stop();
         }
 
         @Override
-        public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep, int xPixelOffset, int yPixelOffset) {
+        public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep,
+                int xPixelOffset, int yPixelOffset) {
             if (currentMediaHandler != null && currentMediaHandler.getCurrentMedia() != null) {
                 MediaInfo currentMedia = currentMediaHandler.getCurrentMedia();
                 if (!currentMedia.isVideo()) {
