@@ -40,12 +40,12 @@ public class CurrentMediaHandler {
     private SharedPreferencesManager manager;
     private int width;
     private int height;
+    private Context context;
 
     private boolean runnable;
     private boolean isPaused;
 
     private Timer currentTimer;
-
     private ArrayList<NextMediaListener> nextMediaListeners;
     private MediaPlayer.OnCompletionListener videoCompletionListener;
 
@@ -53,10 +53,11 @@ public class CurrentMediaHandler {
         void nextMedia(MediaInfo media);
     }
 
-    public CurrentMediaHandler(SharedPreferencesManager manager, int width, int height) {
+    public CurrentMediaHandler(SharedPreferencesManager manager, int width, int height, Context context) {
         this.manager = manager;
         this.width = width;
         this.height = height;
+        this.context = context;
         this.runnable = true;
         this.isPaused = false;
         nextMediaListeners = new ArrayList<>(1);
@@ -64,7 +65,7 @@ public class CurrentMediaHandler {
         // Initialize video completion listener
         videoCompletionListener = mp -> {
             if (runnable && !isPaused) {
-                forceNextMedia(mp.getContext());
+                forceNextMedia(context);
             }
         };
     }

@@ -60,6 +60,16 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import android.os.Handler;
+import android.os.Looper;
+import android.widget.ProgressBar;
+import android.widget.LinearLayout;
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.graphics.Color;
+
 import io.github.doubi88.slideshowwallpaper.R;
 import io.github.doubi88.slideshowwallpaper.listeners.OnCropListener;
 import io.github.doubi88.slideshowwallpaper.listeners.OnSelectListener;
@@ -79,9 +89,14 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     @RequiresApi(Build.VERSION_CODES.KITKAT)
     private ActivityResultLauncher<PickVisualMediaRequest> launcher = null;
 
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private AlertDialog progressDialog;
+
     public ImageListActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            this.launcher = registerForActivityResult(new ActivityResultContracts.PickMultipleVisualMedia(), this::imagePickerCallback);
+            this.launcher = registerForActivityResult(new ActivityResultContracts.PickMultipleVisualMedia(),
+                    this::imagePickerCallback);
         }
     }
 
@@ -90,7 +105,8 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         super.onCreate(savedInstanceState);
         if (savedInstanceState != null) {
             originalUri = savedInstanceState.getParcelable("originalUri");
-            Log.d("CROP_DEBUG", "onCreate: Restored originalUri: " + (originalUri != null ? originalUri.toString() : "null"));
+            Log.d("CROP_DEBUG",
+                    "onCreate: Restored originalUri: " + (originalUri != null ? originalUri.toString() : "null"));
         }
         setContentView(R.layout.image_list);
 
@@ -104,6 +120,7 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         manager = new SharedPreferencesManager(getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE));
 
         List<Uri> uris = manager.getImageUris(SharedPreferencesManager.Ordering.SELECTION);
+        uris = syncImageUris(uris);
 
         imageListAdapter = new ImageListAdapter(uris);
         imageListAdapter.setOnCropListener(this);
@@ -138,20 +155,26 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         }
 
         findViewById(R.id.add_button).setOnClickListener(view -> {
-            Intent intentFile = new Intent();
-            intentFile.setType("*/*");
-            intentFile.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
-            intentFile.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                intentFile.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            }
-            intentFile.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                intentFile.setAction(Intent.ACTION_OPEN_DOCUMENT);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && launcher != null) {
+                launcher.launch(new PickVisualMediaRequest.Builder()
+                        .setMediaType(ActivityResultContracts.PickVisualMedia.ImageAndVideo.INSTANCE)
+                        .build());
             } else {
-                intentFile.setAction(Intent.ACTION_GET_CONTENT);
+                Intent intentFile = new Intent();
+                intentFile.setType("*/*");
+                intentFile.putExtra(Intent.EXTRA_MIME_TYPES, new String[] { "image/*", "video/*" });
+                intentFile.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    intentFile.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+                }
+                intentFile.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    intentFile.setAction(Intent.ACTION_OPEN_DOCUMENT);
+                } else {
+                    intentFile.setAction(Intent.ACTION_GET_CONTENT);
+                }
+                startActivityForResult(intentFile, REQUEST_CODE_FILE);
             }
-            startActivityForResult(intentFile, REQUEST_CODE_FILE);
         });
 
         this.removeButton.setOnClickListener(view -> {
@@ -159,7 +182,8 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
             AlertDialog.Builder builder = new AlertDialog.Builder(this);
             builder.setTitle(getString(R.string.remove_confirmation_title));
-            builder.setMessage(getResources().getQuantityString(R.plurals.remove_confirmation_message, selectedImages.size(), selectedImages.size()));
+            builder.setMessage(getResources().getQuantityString(R.plurals.remove_confirmation_message,
+                    selectedImages.size(), selectedImages.size()));
             builder.setPositiveButton(getString(R.string.positive_action_text), new DialogInterface.OnClickListener() {
                 @Override
                 public void onClick(DialogInterface dialog, int which) {
@@ -177,16 +201,20 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
                                     getContentResolver().delete(uri, null, null);
                                 }
                             } catch (SecurityException e) {
-                                Log.e(ImageListActivity.class.getSimpleName(), "Failed to delete media from MediaStore", e);
+                                Log.e(ImageListActivity.class.getSimpleName(), "Failed to delete media from MediaStore",
+                                        e);
                             }
                         }
 
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && imageInfo.getSize() > 0 && !manager.hasImageUri(uri)) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && imageInfo.getSize() > 0
+                                && !manager.hasImageUri(uri)) {
                             // Try to release permission, but don't crash if it fails
                             try {
-                                getContentResolver().releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                getContentResolver().releasePersistableUriPermission(uri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
                             } catch (SecurityException e) {
-                                Log.e(ImageListActivity.class.getSimpleName(), "Failed to release permission for URI: " + uri, e);
+                                Log.e(ImageListActivity.class.getSimpleName(),
+                                        "Failed to release permission for URI: " + uri, e);
                             }
                         }
                     }
@@ -222,7 +250,8 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
         if (Intent.ACTION_SEND.equals(action) && intent.getParcelableExtra(Intent.EXTRA_STREAM) != null) {
             imageUris.add(intent.getParcelableExtra(Intent.EXTRA_STREAM));
-        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action) && intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM) != null) {
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action)
+                && intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM) != null) {
             imageUris.addAll(intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM));
         }
 
@@ -274,7 +303,7 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
         if (mediaUri != null) {
             try (OutputStream os = resolver.openOutputStream(mediaUri);
-                 InputStream is = resolver.openInputStream(inputUri)) {
+                    InputStream is = resolver.openInputStream(inputUri)) {
                 if (os != null && is != null) {
                     byte[] buffer = new byte[1024];
                     int len;
@@ -298,7 +327,6 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         return mediaUri;
     }
 
-
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
@@ -308,16 +336,63 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     }
 
     private void imagePickerCallback(List<Uri> uris) {
-        List<Uri> urisToAdd = new ArrayList<>(uris.size());
-        for (Uri uri : uris) {
-            Uri newUri = copySharedImageToMediaStore(uri);
-            if (newUri != null && manager.addUri(newUri)) {
-                urisToAdd.add(newUri);
-            }
+        if (uris != null && !uris.isEmpty()) {
+            processSelectedUris(uris);
         }
-        imageListAdapter.addUris(urisToAdd);
     }
 
+    private void processSelectedUris(List<Uri> uris) {
+        showProgressDialog();
+        executor.execute(() -> {
+            List<Uri> urisToAdd = new ArrayList<>();
+            for (Uri uri : uris) {
+                Uri newUri = copySharedImageToMediaStore(uri);
+                if (newUri != null && manager.addUri(newUri)) {
+                    urisToAdd.add(newUri);
+                }
+            }
+            mainHandler.post(() -> {
+                hideProgressDialog();
+                if (!urisToAdd.isEmpty()) {
+                    imageListAdapter.addUris(urisToAdd);
+                }
+            });
+        });
+    }
+
+    private void showProgressDialog() {
+        if (progressDialog == null) {
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setCancelable(false);
+
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.HORIZONTAL);
+            layout.setPadding(40, 40, 40, 40);
+            layout.setGravity(Gravity.CENTER_VERTICAL);
+
+            ProgressBar progressBar = new ProgressBar(this);
+            progressBar.setIndeterminate(true);
+
+            android.widget.TextView tv = new android.widget.TextView(this);
+            tv.setText(R.string.processing_images);
+            tv.setPadding(40, 0, 0, 0);
+            tv.setTextColor(Color.BLACK);
+            tv.setTextSize(16);
+
+            layout.addView(progressBar);
+            layout.addView(tv);
+
+            builder.setView(layout);
+            progressDialog = builder.create();
+        }
+        progressDialog.show();
+    }
+
+    private void hideProgressDialog() {
+        if (progressDialog != null && progressDialog.isShowing()) {
+            progressDialog.dismiss();
+        }
+    }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -327,7 +402,10 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
             Log.d("CROP_DEBUG", "onActivityResult: Crop request finished with result code: " + resultCode);
             if (resultCode == RESULT_OK) {
                 final Uri resultUri = UCrop.getOutput(data);
-                Log.d("CROP_DEBUG", "onActivityResult: Crop successful. Original URI: " + (originalUri != null ? originalUri.toString() : "null") + ", Result URI: " + (resultUri != null ? resultUri.toString() : "null"));
+                Log.d("CROP_DEBUG",
+                        "onActivityResult: Crop successful. Original URI: "
+                                + (originalUri != null ? originalUri.toString() : "null") + ", Result URI: "
+                                + (resultUri != null ? resultUri.toString() : "null"));
                 if (originalUri != null && resultUri != null) {
                     Uri newUri = saveImageToMediaStore(resultUri);
                     if (newUri != null) {
@@ -335,16 +413,31 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
                         manager.removeUri(originalUri);
                         manager.addUri(newUri);
 
+                        // Delete the original image
+                        try {
+                            if ("content".equals(originalUri.getScheme())) {
+                                getContentResolver().delete(originalUri, null, null);
+                            } else if ("file".equals(originalUri.getScheme())) {
+                                new File(originalUri.getPath()).delete();
+                            }
+                        } catch (Exception e) {
+                            Log.e("DELETE_DEBUG", "Failed to delete original image: " + originalUri, e);
+                        }
+
                         // Update the adapter
                         imageListAdapter.replaceUri(originalUri, newUri);
 
                         // Release permission for the original URI if it's no longer needed
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && !manager.hasImageUri(originalUri)) {
                             try {
-                                getContentResolver().releasePersistableUriPermission(originalUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                Log.d("CROP_DEBUG", "onActivityResult: Successfully released permission for " + originalUri.toString());
+                                getContentResolver().releasePersistableUriPermission(originalUri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                Log.d("CROP_DEBUG", "onActivityResult: Successfully released permission for "
+                                        + originalUri.toString());
                             } catch (SecurityException e) {
-                                Log.e("CROP_DEBUG", "onActivityResult: Failed to release permission for " + originalUri.toString(), e);
+                                Log.e("CROP_DEBUG",
+                                        "onActivityResult: Failed to release permission for " + originalUri.toString(),
+                                        e);
                             }
                         }
                     }
@@ -370,16 +463,8 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
                 } else if (data.getData() != null) {
                     resultUris.add(data.getData());
                 }
-
-                for (Uri uri : resultUris) {
-                    Uri newUri = copySharedImageToMediaStore(uri);
-                    if (newUri != null && manager.addUri(newUri)) {
-                        uris.add(newUri);
-                    }
-                }
+                processSelectedUris(resultUris);
             }
-
-            imageListAdapter.addUris(uris);
         }
     }
 
@@ -399,7 +484,7 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
         if (imageUri != null) {
             try (OutputStream os = resolver.openOutputStream(imageUri);
-                 InputStream is = resolver.openInputStream(inputUri)) {
+                    InputStream is = resolver.openInputStream(inputUri)) {
                 if (os != null && is != null) {
                     byte[] buffer = new byte[1024];
                     int len;
@@ -465,5 +550,33 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
         Intent intent = uCrop.getIntent(this);
         startActivityForResult(intent, UCrop.REQUEST_CROP);
+    }
+
+    private List<Uri> syncImageUris(List<Uri> uris) {
+        List<Uri> validUris = new ArrayList<>();
+        for (Uri uri : uris) {
+            boolean exists = false;
+            if ("content".equals(uri.getScheme())) {
+                try {
+                    try (InputStream is = getContentResolver().openInputStream(uri)) {
+                        exists = is != null;
+                    }
+                } catch (Exception e) {
+                    exists = false;
+                }
+            } else if ("file".equals(uri.getScheme())) {
+                File file = new File(uri.getPath());
+                exists = file.exists();
+            } else {
+                exists = true;
+            }
+
+            if (exists) {
+                validUris.add(uri);
+            } else {
+                manager.removeUri(uri);
+            }
+        }
+        return validUris;
     }
 }

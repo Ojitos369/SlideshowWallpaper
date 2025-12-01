@@ -21,6 +21,7 @@ package io.github.doubi88.slideshowwallpaper.utilities;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 
 import java.io.IOException;
@@ -37,7 +38,9 @@ public class MediaLoader {
             bitmap = loadBitmap(uri, context, targetWidth, targetHeight);
         } else if (type == MediaInfo.MediaType.VIDEO) {
             // For videos, we'll get a thumbnail
-            bitmap = ThumbnailUtils.createVideoThumbnail(context, uri);
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            retriever.setDataSource(context, uri);
+            bitmap = retriever.getFrameAtTime();
             if (bitmap != null) {
                 bitmap = Bitmap.createScaledBitmap(bitmap, targetWidth, targetHeight, true);
             }

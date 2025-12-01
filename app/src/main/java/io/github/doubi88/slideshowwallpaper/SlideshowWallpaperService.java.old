@@ -610,7 +610,7 @@ public class SlideshowWallpaperService extends WallpaperService {        private
                 try {
                     mediaPlayer.setDataSource(getApplicationContext(), uri);
                     mediaPlayer.setSurface(getSurfaceHolder().getSurface());
-                    mediaPlayer.setLooping(false);
+                    mediaPlayer.setLooping(true);
 
                     mediaPlayer.setOnPreparedListener(mp -> {
                         if (!surfaceReady) return; // Re-check surface validity before starting.

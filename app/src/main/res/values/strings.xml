@@ -98,4 +98,5 @@
         <item>Hours</item>
     </string-array>
     <string name="no_images_selected_text">Please select at least one image before setting the wallpaper.</string>
+    <string name="processing_images">Processing images...</string>
 </resources>
