@@ -147,7 +147,7 @@ public class SlideshowWallpaperService extends WallpaperService {
                 if (!surfaceReady)
                     return;
                 if (media != null && media.getImage() != null) {
-                    if (!media.isVideo() || !media.isVideoPlaying())
+                    if (!media.isVideo() || !currentMediaHandler.isVideoPlaying())
                         drawImage(media);
                 } else
                     drawBlackScreen();
