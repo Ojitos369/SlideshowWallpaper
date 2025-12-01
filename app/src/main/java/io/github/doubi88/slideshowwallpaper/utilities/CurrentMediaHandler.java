@@ -81,7 +81,7 @@ public class CurrentMediaHandler {
 
             mediaPlayer.setOnCompletionListener(mp -> {
                 Log.d(TAG, "Video completed");
-                // isVideoPlaying is now set to false in loadNewMedia
+                isVideoPlaying = false;
                 if (runnable && !isPaused) {
                     forceNextMedia(context);
                 }
@@ -89,7 +89,7 @@ public class CurrentMediaHandler {
 
             mediaPlayer.setOnErrorListener((mp, what, extra) -> {
                 Log.e(TAG, "Video error: " + what + ", " + extra);
-                // isVideoPlaying is now set to false in loadNewMedia
+                isVideoPlaying = false;
                 if (runnable && !isPaused) {
                     forceNextMedia(context);
                 }
@@ -111,11 +111,18 @@ public class CurrentMediaHandler {
             return;
         }
 
-        initializeMediaPlayer();
+        initializeMediaPlayer(); // Ensures player is not null
 
         try {
             mediaPlayer.reset();
             Log.d(TAG, "MediaPlayer reset");
+
+            // Fix #2: Apply mute setting
+            if (manager.getMuteVideos()) {
+                mediaPlayer.setVolume(0f, 0f);
+            } else {
+                mediaPlayer.setVolume(1f, 1f);
+            }
 
             mediaPlayer.setSurface(surfaceHolder.getSurface());
             Log.d(TAG, "setSurface done");
@@ -206,7 +213,7 @@ public class CurrentMediaHandler {
     private void pauseVideo() {
         if (mediaPlayer != null && mediaPlayer.isPlaying()) {
             mediaPlayer.pause();
-            isVideoPlaying = false;
+            // Fix #3: Do not set isVideoPlaying to false when pausing
         }
     }
 
@@ -310,20 +317,23 @@ public class CurrentMediaHandler {
 
     private boolean loadNewMedia(Context context, Direction direction, boolean isForced) throws IOException {
         synchronized (lock) {
-            // Stop video if we're switching away from it
-            if (isVideoPlaying) {
-                mainHandler.post(() -> {
-                    if (mediaPlayer != null) {
-                        mediaPlayer.reset();
-                    }
-                });
-                isVideoPlaying = false;
-            }
-
             Uri uri = getNextUri(context, direction, isForced);
             boolean result = false;
             if (uri != null) {
                 MediaInfo.MediaType type = MediaInfo.determineType(context, uri);
+
+                // Fix #1: Release player when switching from video to image
+                if (currentMedia != null && currentMedia.isVideo() && type == MediaInfo.MediaType.IMAGE) {
+                    mainHandler.post(() -> {
+                        if (mediaPlayer != null) {
+                            mediaPlayer.release();
+                            mediaPlayer = null;
+                            Log.d(TAG, "MediaPlayer RELEASED for image transition.");
+                        }
+                    });
+                    isVideoPlaying = false;
+                }
+                
                 currentMedia = MediaLoader.loadMedia(uri, context, width, height, type);
 
                 if (currentMedia.isVideo()) {
