@@ -37,7 +37,6 @@ public class SlideshowWallpaperService extends WallpaperService {
         private CurrentMediaHandler currentMediaHandler;
         private int width = 0;
         private int height = 0;
-        // Removed imagePaint - no longer using Canvas rendering
         private final SharedPreferencesManager manager;
         private GestureDetector gestureDetector;
         private boolean surfaceReady = false;
@@ -46,7 +45,6 @@ public class SlideshowWallpaperService extends WallpaperService {
             SharedPreferences prefs = SlideshowWallpaperService.this
                     .getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE);
             manager = new SharedPreferencesManager(prefs);
-            // Removed imagePaint initialization - ExoPlayer handles all rendering
             initGestureDetector();
         }
 
@@ -76,8 +74,13 @@ public class SlideshowWallpaperService extends WallpaperService {
                                     && currentMediaHandler.getCurrentMedia().isVideo()) {
                                 if (currentMediaHandler.isPaused())
                                     currentMediaHandler.resume(getApplicationContext());
-                                else
-                                    currentMediaHandler.pause();
+                                else {
+                                    try {
+                                        currentMediaHandler.pause();
+                                    } catch (Exception ex) {
+                                        Log.e(TAG, "Error pausing video", ex);
+                                    }
+                                }
                                 return true;
                             }
                             return super.onDoubleTap(e);
@@ -144,12 +147,9 @@ public class SlideshowWallpaperService extends WallpaperService {
         }
 
         private void displayCurrentMedia(MediaInfo media) {
-            // ExoPlayer handles all rendering now (images and videos)
-            // No Canvas drawing needed!
-            // Just notify colors for system integration
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                handler.post(this::notifyColorsChanged);
-            }
+            // ExoPlayer handles all rendering, so this method is now just a placeholder
+            // or can be removed if no other UI updates are needed.
+            // Keeping it empty for now to satisfy the listener interface if needed.
         }
 
         @RequiresApi(api = Build.VERSION_CODES.O_MR1)

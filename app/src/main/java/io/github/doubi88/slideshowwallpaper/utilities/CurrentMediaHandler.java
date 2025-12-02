@@ -24,17 +24,30 @@ import android.graphics.Canvas;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.image.ImageRenderer;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.ParcelFileDescriptor;
 import android.util.Log;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.graphics.SurfaceTexture;
+
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.Player;
+import androidx.media3.common.Tracks;
+import androidx.media3.exoplayer.ExoPlayer;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Timer;
-import java.util.TimerTask;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager;
 
@@ -53,14 +66,16 @@ public class CurrentMediaHandler {
     private Handler mainHandler;
 
     private boolean runnable;
-    private boolean isPaused;
+    private boolean isPaused = false;
 
-    private Timer currentTimer;
     private ArrayList<NextMediaListener> nextMediaListeners;
 
-    private ExoPlayer exoPlayer;
     private boolean isVideoPlaying = false;
-    private boolean isSurfaceLocked = false;
+    private ExoPlayer exoPlayer;
+    private GLWallpaperRenderer glRenderer;
+    private SurfaceTexture videoSurfaceTexture;
+    private Surface videoSurface;
+    private ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
 
     public interface NextMediaListener {
         void nextMedia(MediaInfo media);
@@ -81,95 +96,119 @@ public class CurrentMediaHandler {
 
     private void initializeExoPlayer() {
         if (exoPlayer == null) {
-            // ExoPlayer with default renderers (includes ImageRenderer from media3-image)
+            // Standard ExoPlayer without custom ImageRenderer/ImageOutput
+            // We handle rendering via GLWallpaperRenderer
             exoPlayer = new ExoPlayer.Builder(context).build();
-            Log.d(TAG, "ExoPlayer created with image support");
-
-            // Set surface ONCE - it stays under ExoPlayer control forever
-            if (surfaceHolder != null && surfaceHolder.getSurface() != null
-                    && surfaceHolder.getSurface().isValid()) {
-                exoPlayer.setVideoSurface(surfaceHolder.getSurface());
-                Log.d(TAG, "Surface set to ExoPlayer");
-            }
+            Log.d(TAG, "ExoPlayer created for GL rendering");
 
             exoPlayer.addListener(new Player.Listener() {
                 @Override
                 public void onPlaybackStateChanged(int playbackState) {
                     if (playbackState == Player.STATE_ENDED) {
                         Log.d(TAG, "Media playback completed (video or image)");
-                        isVideoPlaying = false;
-                        if (runnable && !isPaused) {
-                            forceNextMedia(context);
-                        }
+                        forceNextMedia(context);
                     }
                 }
 
                 @Override
-                public void onPlayerError(PlaybackException error) {
+                public void onTracksChanged(Tracks tracks) {
+                    Log.d(TAG, "Tracks changed: " + tracks);
+                }
+
+                @Override
+                public void onPlayerError(androidx.media3.common.PlaybackException error) {
                     Log.e(TAG, "ExoPlayer error", error);
-                    isVideoPlaying = false;
-                    if (runnable && !isPaused) {
-                        forceNextMedia(context);
-                    }
+                    forceNextMedia(context);
                 }
             });
         }
     }
 
     /**
-     * Unified method to prepare and play BOTH images and videos using ExoPlayer.
-     * Uses media3-image library for image rendering with duration.
+     * Prepare media - Videos and Images use ExoPlayer.
      */
     private void prepareMedia(Uri uri, boolean isVideo) {
         Log.d(TAG, "prepareMedia: " + uri + " (isVideo=" + isVideo + ")");
 
+        isVideoPlaying = isVideo;
         initializeExoPlayer();
 
-        try {
-            MediaItem mediaItem;
+        if (glRenderer == null && surfaceHolder != null) {
+            glRenderer = new GLWallpaperRenderer(context);
+            glRenderer.setSurface(surfaceHolder);
 
-            if (isVideo) {
-                // Video: standard MediaItem
-                mediaItem = MediaItem.fromUri(uri);
-                Log.d(TAG, "Preparing video MediaItem");
-            } else {
-                // Image: MediaItem with duration using media3-image
-                long imageDurationMs = getImageDurationMs();
-                mediaItem = new MediaItem.Builder()
-                        .setUri(uri)
-                        .setImageDurationMs(imageDurationMs)
-                        .build();
-                Log.d(TAG, "Preparing image MediaItem with duration: " + imageDurationMs + "ms");
-            }
-
-            // Apply mute setting (videos only, images have no audio)
-            if (isVideo && manager.getMuteVideos()) {
-                exoPlayer.setVolume(0f);
-            } else if (isVideo) {
-                exoPlayer.setVolume(1f);
-            }
-
-            exoPlayer.setMediaItem(mediaItem);
-            exoPlayer.prepare();
-
-            if (!isPaused) {
-                exoPlayer.play();
-                if (isVideo) {
-                    isVideoPlaying = true;
+            // Setup SurfaceTexture for video
+            videoSurfaceTexture = new SurfaceTexture(glRenderer.getVideoTextureId());
+            videoSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
+                if (isVideoPlaying) {
+                    surfaceTexture.updateTexImage();
+                    glRenderer.drawVideo();
                 }
-                Log.d(TAG, "Playback started");
-            } else {
-                Log.d(TAG, "Media prepared but paused. isPaused=" + isPaused);
-            }
+            });
+            videoSurface = new Surface(videoSurfaceTexture);
+        }
 
+        try {
+            if (isVideo) {
+                exoPlayer.setVideoSurface(videoSurface);
+                MediaItem mediaItem = MediaItem.fromUri(uri);
+                if (manager.getMuteVideos()) {
+                    exoPlayer.setVolume(0f);
+                } else {
+                    exoPlayer.setVolume(1f);
+                }
+                exoPlayer.setMediaItem(mediaItem);
+                exoPlayer.prepare();
+                if (!isPaused) {
+                    exoPlayer.play();
+                }
+            } else {
+                // For images, we load bitmap manually and render via GL
+                exoPlayer.stop();
+                exoPlayer.clearMediaItems();
+
+                imageExecutor.execute(() -> {
+                    try {
+                        InputStream inputStream = context.getContentResolver().openInputStream(uri);
+                        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                        if (inputStream != null)
+                            inputStream.close();
+
+                        if (bitmap != null) {
+                            new Handler(Looper.getMainLooper()).post(() -> {
+                                if (!isVideoPlaying) {
+                                    glRenderer.uploadImage(bitmap);
+                                    glRenderer.drawImage();
+
+                                    // Simulate playback duration for image
+                                    long durationMs = getImageDurationMs();
+                                    new Handler().postDelayed(() -> {
+                                        if (!isVideoPlaying && !isPaused) {
+                                            forceNextMedia(context);
+                                        }
+                                    }, durationMs);
+                                }
+                            });
+                        }
+                    } catch (IOException e) {
+                        Log.e(TAG, "Error loading image", e);
+                        forceNextMedia(context);
+                    }
+                });
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error preparing media: " + e.getMessage(), e);
-            isVideoPlaying = false;
-            if (runnable && !isPaused) {
-                forceNextMedia(context);
-            }
+            forceNextMedia(context);
         }
     }
+
+    /**
+     * Prepare video using ExoPlayer.
+     */
+
+    /**
+     * Release ExoPlayer completely.
+     */
 
     /**
      * Get image display duration in milliseconds from preferences.
@@ -184,28 +223,18 @@ public class CurrentMediaHandler {
         return seconds * 1000L;
     }
 
-    public void updateSurface(android.view.SurfaceHolder holder) {
+    public void updateSurface(SurfaceHolder holder) {
         this.surfaceHolder = holder;
-
-        if (exoPlayer != null) {
-            // Validate new surface before updating
-            if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
-                try {
-                    exoPlayer.setVideoSurface(holder.getSurface());
-                    Log.d(TAG, "Surface updated successfully");
-
-                    // Resume if was playing and not paused
-                    if (!isPaused) {
-                        exoPlayer.play();
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error updating surface", e);
-                    pauseVideo();
-                }
-            } else {
-                Log.w(TAG, "New surface is invalid, pausing playback");
-                pauseVideo();
-            }
+        // GLRenderer initialization is deferred to prepareMedia or can be done here if
+        // context is ready
+        // But we need to ensure GL context is created on the right thread if we were
+        // using a GLThread.
+        // Here we are running on main thread/service thread, so it should be fine for
+        // simple usage.
+        // However, if we want to re-init renderer:
+        if (glRenderer != null) {
+            glRenderer.release();
+            glRenderer = null;
         }
     }
 
@@ -240,62 +269,39 @@ public class CurrentMediaHandler {
     public void startTimer(Context context) {
         runnable = true;
         isPaused = false;
-        if (isVideoPlaying) {
-            startVideo();
-        } else {
-            long update = getDelaySeconds(context);
-            updateAfter(context, update);
-        }
+        startPlayback();
     }
 
     public void pause() {
         isPaused = true;
-        if (isVideoPlaying) {
-            pauseVideo();
+        if (exoPlayer != null && exoPlayer.isPlaying()) {
+            exoPlayer.pause();
         }
     }
 
     public void resume(Context context) {
         isPaused = false;
-        if (isVideoPlaying) {
-            startVideo();
-        } else {
-            startTimer(context);
-        }
+        startPlayback();
     }
 
-    private void startVideo() {
+    private void startPlayback() {
         if (exoPlayer != null && !exoPlayer.isPlaying()) {
             exoPlayer.play();
-            isVideoPlaying = true;
-        }
-    }
-
-    private void pauseVideo() {
-        if (exoPlayer != null && exoPlayer.isPlaying()) {
-            exoPlayer.pause();
-            // Fix #3: Do not set isVideoPlaying to false when pausing
         }
     }
 
     public void updateAfter(Context context, long delay) {
-        if (currentTimer != null) {
-            currentTimer.cancel();
-            currentTimer = null;
-        }
-        if (runnable && !isPaused && !isVideoPlaying) {
-            currentTimer = new Timer("CurrentMediaHandlerTimer");
-            currentTimer.schedule(new Runner(context), delay < 0 ? 0 : delay * 1000);
+        // Deprecated: Timer logic removed.
+        // This method is kept if needed for interface compatibility but should trigger
+        // next media.
+        if (runnable && !isPaused) {
+            forceNextMedia(context);
         }
     }
 
     public void stop() {
         Log.d(TAG, "stop() called");
         runnable = false;
-        if (currentTimer != null) {
-            currentTimer.cancel();
-            currentTimer = null;
-        }
         if (exoPlayer != null) {
             try {
                 Log.d(TAG, "Stopping and releasing ExoPlayer");
@@ -309,13 +315,24 @@ public class CurrentMediaHandler {
                 exoPlayer = null; // Force null even on error
             }
         }
+        if (glRenderer != null) {
+            glRenderer.release();
+            glRenderer = null;
+        }
+        if (videoSurface != null) {
+            videoSurface.release();
+            videoSurface = null;
+        }
+        if (videoSurfaceTexture != null) {
+            videoSurfaceTexture.release();
+            videoSurfaceTexture = null;
+        }
         currentMedia = null;
         isVideoPlaying = false;
-        isSurfaceLocked = false;
     }
 
     public boolean isStarted() {
-        return currentTimer != null && runnable;
+        return runnable;
     }
 
     public boolean isPaused() {
@@ -326,43 +343,24 @@ public class CurrentMediaHandler {
         return isVideoPlaying;
     }
 
-    public boolean isSurfaceLocked() {
-        return isSurfaceLocked;
-    }
-
     /**
      * Clear the surface by drawing black screen.
      * This is CRITICAL before video playback to disconnect Canvas from the Surface.
      * MediaCodec requires exclusive Surface access and will fail if Canvas is still
      * connected.
      */
-    private void clearSurfaceForVideo() {
-        if (surfaceHolder != null) {
-            Canvas canvas = null;
-            try {
-                canvas = surfaceHolder.lockCanvas();
-                if (canvas != null) {
-                    canvas.drawColor(android.graphics.Color.BLACK);
-                    Log.d(TAG, "Surface cleared for video playback");
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error clearing surface", e);
-            } finally {
-                if (canvas != null) {
-                    surfaceHolder.unlockCanvasAndPost(canvas);
-                }
-            }
-        }
-    }
 
     public void forceNextMedia(Context context) {
         synchronized (lock) {
             if (runnable) {
-                if (currentTimer != null) {
-                    currentTimer.cancel();
-                }
-                currentTimer = new Timer("CurrentMediaHandlerTimer");
-                currentTimer.schedule(new Runner(context, Direction.NEXT, true), 0);
+                // Use a Handler to avoid Thread issues if called from background
+                mainHandler.post(() -> {
+                    try {
+                        loadNewMedia(context, Direction.NEXT, true);
+                    } catch (IOException e) {
+                        Log.e(TAG, "Error loading next media", e);
+                    }
+                });
             }
         }
     }
@@ -370,46 +368,20 @@ public class CurrentMediaHandler {
     public void forcePreviousMedia(Context context) {
         synchronized (lock) {
             if (runnable) {
-                if (currentTimer != null) {
-                    currentTimer.cancel();
-                }
-                currentTimer = new Timer("CurrentMediaHandlerTimer");
-                currentTimer.schedule(new Runner(context, Direction.PREVIOUS, true), 0);
+                // Use a Handler to avoid Thread issues if called from background
+                mainHandler.post(() -> {
+                    try {
+                        loadNewMedia(context, Direction.PREVIOUS, true);
+                    } catch (IOException e) {
+                        Log.e(TAG, "Error loading previous media", e);
+                    }
+                });
             }
         }
     }
 
     private enum Direction {
         NEXT, PREVIOUS
-    }
-
-    private class Runner extends TimerTask {
-        private Context context;
-        private Direction direction;
-        private boolean isForced;
-
-        public Runner(Context context) {
-            this(context, Direction.NEXT, false);
-        }
-
-        public Runner(Context context, Direction direction, boolean isForced) {
-            this.context = context;
-            this.direction = direction;
-            this.isForced = isForced;
-        }
-
-        @Override
-        public void run() {
-            try {
-                loadNewMedia(context, direction, isForced);
-            } catch (IOException e) {
-                Log.e(TAG, "Error loading media", e);
-            }
-
-            if (runnable && !isPaused && (currentMedia == null || !currentMedia.isVideo())) {
-                startTimer(context);
-            }
-        }
     }
 
     private boolean loadNewMedia(Context context, Direction direction, boolean isForced) throws IOException {
