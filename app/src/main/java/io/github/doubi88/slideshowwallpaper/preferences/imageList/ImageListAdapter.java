@@ -48,7 +48,6 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
     private HashMap<Uri, AsyncTaskLoadImages> loading;
     private HashSet<ImageInfo> selectedImages;
 
-
     public ImageListAdapter(List<Uri> uris) {
         this.selectedImages = new HashSet<>();
         this.uris = new ArrayList<>(uris);
@@ -73,7 +72,8 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
             }
 
             @Override
-            public void onSelectionChanged(HashSet<ImageInfo> setInfo) {}
+            public void onSelectionChanged(HashSet<ImageInfo> setInfo) {
+            }
         });
         holder.setOnCropListener(this.cropListener);
         return holder;
@@ -100,22 +100,26 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
         final Uri uri = uris.get(position);
         AsyncTaskLoadImages asyncTask = loading.get(uri);
         if (asyncTask == null) {
-            asyncTask = new AsyncTaskLoadImages(holder.itemView.getContext(), holder.itemView.getWidth(), holder.itemView.getResources().getDimensionPixelSize(R.dimen.image_preview_height));
+            asyncTask = new AsyncTaskLoadImages(holder.itemView.getContext(), holder.itemView.getWidth(),
+                    holder.itemView.getResources().getDimensionPixelSize(R.dimen.image_preview_height));
             loading.put(uri, asyncTask);
 
             asyncTask.addProgressListener(new ProgressListener<Uri, BigDecimal, List<ImageInfo>>() {
                 @Override
-                public void onProgressChanged(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task, BigDecimal current, BigDecimal max) {
+                public void onProgressChanged(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task, BigDecimal current,
+                        BigDecimal max) {
 
                 }
 
                 @Override
-                public void onTaskFinished(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task, List<ImageInfo> imageInfos) {
+                public void onTaskFinished(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task,
+                        List<ImageInfo> imageInfos) {
                     loading.remove(uri);
                 }
 
                 @Override
-                public void onTaskCancelled(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task, List<ImageInfo> imageInfos) {
+                public void onTaskCancelled(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task,
+                        List<ImageInfo> imageInfos) {
                     loading.remove(uri);
                 }
             });
@@ -123,6 +127,15 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
         }
         asyncTask.addProgressListener(holder);
         holder.setUri(uri);
+
+        // Restore selection state
+        // We create a dummy ImageInfo because equals() only checks URI
+        ImageInfo tempInfo = new ImageInfo(uri, null, 0, null);
+        if (selectedImages.contains(tempInfo)) {
+            holder.SelectImage();
+        } else {
+            holder.DeselectImage();
+        }
     }
 
     @Override
@@ -141,7 +154,7 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
     }
 
     public void delete(HashSet<ImageInfo> imageInfos) {
-        for (ImageInfo imageInfo : imageInfos){
+        for (ImageInfo imageInfo : imageInfos) {
             int index = uris.indexOf(imageInfo.getUri());
             uris.remove(index);
             notifyItemRemoved(index);
@@ -150,21 +163,21 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
         notifyListeners();
     }
 
-    private void select(ImageInfo info){
+    private void select(ImageInfo info) {
         selectedImages.add(info);
-        for (OnSelectListener listener: this.listeners){
+        for (OnSelectListener listener : this.listeners) {
             listener.onSelectionChanged(this.selectedImages);
         }
     }
 
-    private void deselect(ImageInfo info){
+    private void deselect(ImageInfo info) {
         selectedImages.remove(info);
-        for (OnSelectListener listener: this.listeners){
+        for (OnSelectListener listener : this.listeners) {
             listener.onSelectionChanged(this.selectedImages);
         }
     }
 
-    public HashSet<ImageInfo> getSelectedImages(){
+    public HashSet<ImageInfo> getSelectedImages() {
         return this.selectedImages;
     }
 
@@ -178,6 +191,15 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
     public void replaceUri(Uri oldUri, Uri newUri) {
         int index = uris.indexOf(oldUri);
         if (index != -1) {
+            // Check if the old URI was selected
+            // We create dummy ImageInfos because equals() only checks URI
+            ImageInfo oldInfo = new ImageInfo(oldUri, null, 0, null);
+            if (selectedImages.contains(oldInfo)) {
+                selectedImages.remove(oldInfo);
+                selectedImages.add(new ImageInfo(newUri, null, 0, null));
+                notifyListeners(); // Notify that selection set changed (content-wise)
+            }
+
             uris.set(index, newUri);
             notifyItemChanged(index);
         }

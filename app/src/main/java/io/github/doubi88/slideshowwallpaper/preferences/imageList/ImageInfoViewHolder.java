@@ -42,7 +42,8 @@ import io.github.doubi88.slideshowwallpaper.utilities.ImageInfo;
 import io.github.doubi88.slideshowwallpaper.utilities.ImageLoader;
 import io.github.doubi88.slideshowwallpaper.utilities.ProgressListener;
 
-public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements ProgressListener<Uri, BigDecimal, List<ImageInfo>> {
+public class ImageInfoViewHolder extends RecyclerView.ViewHolder
+        implements ProgressListener<Uri, BigDecimal, List<ImageInfo>> {
 
     private final int height;
     private final int width;
@@ -58,7 +59,6 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
 
     private LinkedList<OnSelectListener> listeners;
     private OnCropListener cropListener;
-
 
     public ImageInfoViewHolder(View itemView) {
         super(itemView);
@@ -104,10 +104,11 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
             notifyOnImageSelected();
         }
     }
-    private void DeselectImage() {
+
+    public void DeselectImage() {
         Log.i(ImageInfoViewHolder.class.getSimpleName(), "Deselect the image");
 
-        this.frameLayout.setPadding(0,0,0,0);
+        this.frameLayout.setPadding(0, 0, 0, 0);
         this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.secondaryTextColor));
         this.checkIcon.setVisibility(View.GONE);
         this.cropIcon.setVisibility(View.GONE);
@@ -115,13 +116,27 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
         imageIsSelected = false;
     }
 
-    private void SelectImage() {
+    public void SelectImage() {
         Log.i(ImageInfoViewHolder.class.getSimpleName(), "Select the image");
 
-        this.frameLayout.setPadding(10,10,10,10);
+        this.frameLayout.setPadding(10, 10, 10, 10);
         this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.primaryLightColor));
         this.checkIcon.setVisibility(View.VISIBLE);
-        this.cropIcon.setVisibility(View.VISIBLE);
+
+        // Check if it is a video to hide the edit button
+        boolean isVideo = false;
+        if (imageInfo != null && imageInfo.getUri() != null) {
+            String type = imageView.getContext().getContentResolver().getType(imageInfo.getUri());
+            if (type != null && type.startsWith("video/")) {
+                isVideo = true;
+            }
+        }
+
+        if (isVideo) {
+            this.cropIcon.setVisibility(View.GONE);
+        } else {
+            this.cropIcon.setVisibility(View.VISIBLE);
+        }
 
         imageIsSelected = true;
     }
@@ -131,7 +146,8 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
     }
 
     @Override
-    public void onProgressChanged(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task, BigDecimal current, BigDecimal max) {
+    public void onProgressChanged(AsyncTask<Uri, BigDecimal, List<ImageInfo>> task, BigDecimal current,
+            BigDecimal max) {
         progressBar.setMax(max.intValue());
         progressBar.setProgress(current.intValue());
     }
@@ -142,7 +158,8 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
             imageInfo = imageInfos.get(0);
             if (imageInfo.getImage() != null) {
                 Matrix matrix = ImageLoader.calculateMatrixScaleToFit(imageInfo.getImage(), width, height, false);
-                imageView.setImageBitmap(Bitmap.createBitmap(imageInfo.getImage(), 0, 0, imageInfo.getImage().getWidth(), imageInfo.getImage().getHeight(), matrix, false));
+                imageView.setImageBitmap(Bitmap.createBitmap(imageInfo.getImage(), 0, 0,
+                        imageInfo.getImage().getWidth(), imageInfo.getImage().getHeight(), matrix, false));
             }
             progressBar.setVisibility(View.GONE);
 
@@ -168,13 +185,13 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder implements Prog
         this.cropListener = listener;
     }
 
-    public void notifyOnImageSelected(){
+    public void notifyOnImageSelected() {
         for (OnSelectListener listener : listeners) {
             listener.onImageSelected(imageInfo);
         }
     }
 
-    public void notifyOnImageDeselected(){
+    public void notifyOnImageDeselected() {
         for (OnSelectListener listener : listeners) {
             listener.onImagedDeselected(imageInfo);
         }

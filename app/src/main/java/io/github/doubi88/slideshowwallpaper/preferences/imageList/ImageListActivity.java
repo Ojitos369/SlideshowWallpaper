@@ -399,44 +399,6 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == REQUEST_CODE_VIDEO_EDIT) {
-            if (resultCode == RESULT_OK && data != null) {
-                Uri resultUri = data
-                        .getParcelableExtra(io.github.doubi88.slideshowwallpaper.VideoEditorActivity.RESULT_VIDEO_URI);
-                if (originalUri != null && resultUri != null) {
-                    Uri newUri = saveVideoToMediaStore(resultUri);
-                    if (newUri != null) {
-                        manager.removeUri(originalUri);
-                        manager.addUri(newUri);
-
-                        // Delete the original video
-                        try {
-                            if ("content".equals(originalUri.getScheme())) {
-                                getContentResolver().delete(originalUri, null, null);
-                            } else if ("file".equals(originalUri.getScheme())) {
-                                new File(originalUri.getPath()).delete();
-                            }
-                        } catch (Exception e) {
-                            Log.e("DELETE_DEBUG", "Failed to delete original video: " + originalUri, e);
-                        }
-
-                        imageListAdapter.replaceUri(originalUri, newUri);
-
-                        // Release permission
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && !manager.hasImageUri(originalUri)) {
-                            try {
-                                getContentResolver().releasePersistableUriPermission(originalUri,
-                                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                            } catch (SecurityException e) {
-                                // Ignore
-                            }
-                        }
-                    }
-                }
-                originalUri = null;
-            }
-        }
-
         if (requestCode == UCrop.REQUEST_CROP) {
             Log.d("CROP_DEBUG", "onActivityResult: Crop request finished with result code: " + resultCode);
             if (resultCode == RESULT_OK) {
@@ -592,14 +554,6 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     public void onCrop(Uri uri) {
         Log.d("CROP_DEBUG", "onCrop: Cropping image with uri: " + uri.toString());
         this.originalUri = uri;
-
-        String mimeType = getContentResolver().getType(uri);
-        if (mimeType != null && mimeType.startsWith("video/")) {
-            Intent intent = new Intent(this, io.github.doubi88.slideshowwallpaper.VideoEditorActivity.class);
-            intent.putExtra(io.github.doubi88.slideshowwallpaper.VideoEditorActivity.EXTRA_VIDEO_URI, uri);
-            startActivityForResult(intent, REQUEST_CODE_VIDEO_EDIT);
-            return;
-        }
 
         UCrop.Options options = new UCrop.Options();
 
