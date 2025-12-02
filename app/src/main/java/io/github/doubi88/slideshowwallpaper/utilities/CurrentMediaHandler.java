@@ -20,7 +20,11 @@ package io.github.doubi88.slideshowwallpaper.utilities;
 
 import android.content.Context;
 import android.content.res.Resources;
-import android.media.MediaPlayer;
+import android.graphics.Canvas;
+import androidx.media3.common.MediaItem;
+import androidx.media3.common.PlaybackException;
+import androidx.media3.common.Player;
+import androidx.media3.exoplayer.ExoPlayer;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
@@ -54,8 +58,9 @@ public class CurrentMediaHandler {
     private Timer currentTimer;
     private ArrayList<NextMediaListener> nextMediaListeners;
 
-    private MediaPlayer mediaPlayer;
+    private ExoPlayer exoPlayer;
     private boolean isVideoPlaying = false;
+    private boolean isSurfaceLocked = false;
 
     public interface NextMediaListener {
         void nextMedia(MediaInfo media);
@@ -74,76 +79,132 @@ public class CurrentMediaHandler {
         nextMediaListeners = new ArrayList<>(1);
     }
 
-    private void initializeMediaPlayer() {
-        if (mediaPlayer == null) {
-            mediaPlayer = new MediaPlayer();
-            Log.d(TAG, "MediaPlayer created");
+    private void initializeExoPlayer() {
+        if (exoPlayer == null) {
+            // ExoPlayer with default renderers (includes ImageRenderer from media3-image)
+            exoPlayer = new ExoPlayer.Builder(context).build();
+            Log.d(TAG, "ExoPlayer created with image support");
 
-            mediaPlayer.setOnCompletionListener(mp -> {
-                Log.d(TAG, "Video completed");
-                isVideoPlaying = false;
-                if (runnable && !isPaused) {
-                    forceNextMedia(context);
+            // Set surface ONCE - it stays under ExoPlayer control forever
+            if (surfaceHolder != null && surfaceHolder.getSurface() != null
+                    && surfaceHolder.getSurface().isValid()) {
+                exoPlayer.setVideoSurface(surfaceHolder.getSurface());
+                Log.d(TAG, "Surface set to ExoPlayer");
+            }
+
+            exoPlayer.addListener(new Player.Listener() {
+                @Override
+                public void onPlaybackStateChanged(int playbackState) {
+                    if (playbackState == Player.STATE_ENDED) {
+                        Log.d(TAG, "Media playback completed (video or image)");
+                        isVideoPlaying = false;
+                        if (runnable && !isPaused) {
+                            forceNextMedia(context);
+                        }
+                    }
                 }
-            });
 
-            mediaPlayer.setOnErrorListener((mp, what, extra) -> {
-                Log.e(TAG, "Video error: " + what + ", " + extra);
-                isVideoPlaying = false;
-                if (runnable && !isPaused) {
-                    forceNextMedia(context);
-                }
-                return true; // We handled the error
-            });
-
-            mediaPlayer.setOnPreparedListener(mp -> {
-                Log.d(TAG, "Video prepared");
-                if (!isPaused) {
-                    startVideo();
+                @Override
+                public void onPlayerError(PlaybackException error) {
+                    Log.e(TAG, "ExoPlayer error", error);
+                    isVideoPlaying = false;
+                    if (runnable && !isPaused) {
+                        forceNextMedia(context);
+                    }
                 }
             });
         }
     }
 
-    private void prepareVideo(Uri uri) {
-        if (surfaceHolder == null || !surfaceHolder.getSurface().isValid()) {
-            Log.e(TAG, "Surface is not valid, cannot prepare video.");
-            return;
-        }
+    /**
+     * Unified method to prepare and play BOTH images and videos using ExoPlayer.
+     * Uses media3-image library for image rendering with duration.
+     */
+    private void prepareMedia(Uri uri, boolean isVideo) {
+        Log.d(TAG, "prepareMedia: " + uri + " (isVideo=" + isVideo + ")");
 
-        initializeMediaPlayer(); // Ensures player is not null
+        initializeExoPlayer();
 
         try {
-            mediaPlayer.reset();
-            Log.d(TAG, "MediaPlayer reset");
+            MediaItem mediaItem;
 
-            // Fix #2: Apply mute setting
-            if (manager.getMuteVideos()) {
-                mediaPlayer.setVolume(0f, 0f);
+            if (isVideo) {
+                // Video: standard MediaItem
+                mediaItem = MediaItem.fromUri(uri);
+                Log.d(TAG, "Preparing video MediaItem");
             } else {
-                mediaPlayer.setVolume(1f, 1f);
+                // Image: MediaItem with duration using media3-image
+                long imageDurationMs = getImageDurationMs();
+                mediaItem = new MediaItem.Builder()
+                        .setUri(uri)
+                        .setImageDurationMs(imageDurationMs)
+                        .build();
+                Log.d(TAG, "Preparing image MediaItem with duration: " + imageDurationMs + "ms");
             }
 
-            mediaPlayer.setSurface(surfaceHolder.getSurface());
-            Log.d(TAG, "setSurface done");
-
-            ParcelFileDescriptor pfd = context.getContentResolver().openFileDescriptor(uri, "r");
-            if (pfd != null) {
-                long size = pfd.getStatSize();
-                mediaPlayer.setDataSource(pfd.getFileDescriptor(), 0, size);
-                pfd.close();
-                Log.d(TAG, "setDataSource with size: " + size);
-            } else {
-                throw new IOException("FileDescriptor is null for uri: " + uri);
+            // Apply mute setting (videos only, images have no audio)
+            if (isVideo && manager.getMuteVideos()) {
+                exoPlayer.setVolume(0f);
+            } else if (isVideo) {
+                exoPlayer.setVolume(1f);
             }
-            
-            mediaPlayer.prepareAsync();
-            Log.d(TAG, "prepareAsync called");
+
+            exoPlayer.setMediaItem(mediaItem);
+            exoPlayer.prepare();
+
+            if (!isPaused) {
+                exoPlayer.play();
+                if (isVideo) {
+                    isVideoPlaying = true;
+                }
+                Log.d(TAG, "Playback started");
+            } else {
+                Log.d(TAG, "Media prepared but paused. isPaused=" + isPaused);
+            }
 
         } catch (Exception e) {
-            Log.e(TAG, "Error preparing video", e);
+            Log.e(TAG, "Error preparing media: " + e.getMessage(), e);
+            isVideoPlaying = false;
             if (runnable && !isPaused) {
                 forceNextMedia(context);
+            }
+        }
+    }
+
+    /**
+     * Get image display duration in milliseconds from preferences.
+     */
+    private long getImageDurationMs() {
+        int seconds = 5; // default
+        try {
+            seconds = manager.getSecondsBetweenImages();
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting image duration, using default", e);
+        }
+        return seconds * 1000L;
+    }
+
+    public void updateSurface(android.view.SurfaceHolder holder) {
+        this.surfaceHolder = holder;
+
+        if (exoPlayer != null) {
+            // Validate new surface before updating
+            if (holder != null && holder.getSurface() != null && holder.getSurface().isValid()) {
+                try {
+                    exoPlayer.setVideoSurface(holder.getSurface());
+                    Log.d(TAG, "Surface updated successfully");
+
+                    // Resume if was playing and not paused
+                    if (!isPaused) {
+                        exoPlayer.play();
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error updating surface", e);
+                    pauseVideo();
+                }
+            } else {
+                Log.w(TAG, "New surface is invalid, pausing playback");
+                pauseVideo();
             }
         }
     }
@@ -204,15 +265,15 @@ public class CurrentMediaHandler {
     }
 
     private void startVideo() {
-        if (mediaPlayer != null && !mediaPlayer.isPlaying()) {
-            mediaPlayer.start();
+        if (exoPlayer != null && !exoPlayer.isPlaying()) {
+            exoPlayer.play();
             isVideoPlaying = true;
         }
     }
 
     private void pauseVideo() {
-        if (mediaPlayer != null && mediaPlayer.isPlaying()) {
-            mediaPlayer.pause();
+        if (exoPlayer != null && exoPlayer.isPlaying()) {
+            exoPlayer.pause();
             // Fix #3: Do not set isVideoPlaying to false when pausing
         }
     }
@@ -229,18 +290,28 @@ public class CurrentMediaHandler {
     }
 
     public void stop() {
+        Log.d(TAG, "stop() called");
         runnable = false;
         if (currentTimer != null) {
             currentTimer.cancel();
             currentTimer = null;
         }
-        if (mediaPlayer != null) {
-            mediaPlayer.release();
-            mediaPlayer = null;
-            Log.d(TAG, "MediaPlayer released");
+        if (exoPlayer != null) {
+            try {
+                Log.d(TAG, "Stopping and releasing ExoPlayer");
+                exoPlayer.stop();
+                exoPlayer.clearVideoSurface();
+                exoPlayer.release();
+                exoPlayer = null;
+                Log.d(TAG, "ExoPlayer released");
+            } catch (Exception e) {
+                Log.e(TAG, "Error stopping ExoPlayer", e);
+                exoPlayer = null; // Force null even on error
+            }
         }
         currentMedia = null;
         isVideoPlaying = false;
+        isSurfaceLocked = false;
     }
 
     public boolean isStarted() {
@@ -253,6 +324,35 @@ public class CurrentMediaHandler {
 
     public boolean isVideoPlaying() {
         return isVideoPlaying;
+    }
+
+    public boolean isSurfaceLocked() {
+        return isSurfaceLocked;
+    }
+
+    /**
+     * Clear the surface by drawing black screen.
+     * This is CRITICAL before video playback to disconnect Canvas from the Surface.
+     * MediaCodec requires exclusive Surface access and will fail if Canvas is still
+     * connected.
+     */
+    private void clearSurfaceForVideo() {
+        if (surfaceHolder != null) {
+            Canvas canvas = null;
+            try {
+                canvas = surfaceHolder.lockCanvas();
+                if (canvas != null) {
+                    canvas.drawColor(android.graphics.Color.BLACK);
+                    Log.d(TAG, "Surface cleared for video playback");
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error clearing surface", e);
+            } finally {
+                if (canvas != null) {
+                    surfaceHolder.unlockCanvasAndPost(canvas);
+                }
+            }
+        }
     }
 
     public void forceNextMedia(Context context) {
@@ -301,10 +401,7 @@ public class CurrentMediaHandler {
         @Override
         public void run() {
             try {
-                boolean updated = loadNewMedia(context, direction, isForced);
-                if (updated) {
-                    notifyNextMediaListeners(currentMedia);
-                }
+                loadNewMedia(context, direction, isForced);
             } catch (IOException e) {
                 Log.e(TAG, "Error loading media", e);
             }
@@ -321,28 +418,19 @@ public class CurrentMediaHandler {
             boolean result = false;
             if (uri != null) {
                 MediaInfo.MediaType type = MediaInfo.determineType(context, uri);
-
-                // Fix #1: Release player when switching from video to image
-                if (currentMedia != null && currentMedia.isVideo() && type == MediaInfo.MediaType.IMAGE) {
-                    mainHandler.post(() -> {
-                        if (mediaPlayer != null) {
-                            mediaPlayer.release();
-                            mediaPlayer = null;
-                            Log.d(TAG, "MediaPlayer RELEASED for image transition.");
-                        }
-                    });
-                    isVideoPlaying = false;
-                }
-                
                 currentMedia = MediaLoader.loadMedia(uri, context, width, height, type);
 
-                if (currentMedia.isVideo()) {
-                    Log.d(TAG, "Loading video: " + uri);
-                    mainHandler.post(() -> prepareVideo(uri));
-                } else {
-                    Log.d(TAG, "Loading image: " + uri);
+                if (currentMedia != null) {
+                    boolean isVideo = currentMedia.isVideo();
+                    Log.d(TAG, "Loading " + (isVideo ? "video" : "image") + ": " + uri);
+
+                    notifyNextMediaListeners(currentMedia);
+
+                    // Use unified prepareMedia for both types
+                    mainHandler.post(() -> prepareMedia(uri, isVideo));
+
+                    result = true;
                 }
-                result = true;
             }
             return result;
         }

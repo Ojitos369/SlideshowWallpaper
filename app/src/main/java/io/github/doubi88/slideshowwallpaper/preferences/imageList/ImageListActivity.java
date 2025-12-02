@@ -80,6 +80,7 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
 
     private SharedPreferencesManager manager;
     private static final int REQUEST_CODE_FILE = 1;
+    private static final int REQUEST_CODE_VIDEO_EDIT = 2;
 
     private ImageListAdapter imageListAdapter;
 
@@ -398,6 +399,44 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
+        if (requestCode == REQUEST_CODE_VIDEO_EDIT) {
+            if (resultCode == RESULT_OK && data != null) {
+                Uri resultUri = data
+                        .getParcelableExtra(io.github.doubi88.slideshowwallpaper.VideoEditorActivity.RESULT_VIDEO_URI);
+                if (originalUri != null && resultUri != null) {
+                    Uri newUri = saveVideoToMediaStore(resultUri);
+                    if (newUri != null) {
+                        manager.removeUri(originalUri);
+                        manager.addUri(newUri);
+
+                        // Delete the original video
+                        try {
+                            if ("content".equals(originalUri.getScheme())) {
+                                getContentResolver().delete(originalUri, null, null);
+                            } else if ("file".equals(originalUri.getScheme())) {
+                                new File(originalUri.getPath()).delete();
+                            }
+                        } catch (Exception e) {
+                            Log.e("DELETE_DEBUG", "Failed to delete original video: " + originalUri, e);
+                        }
+
+                        imageListAdapter.replaceUri(originalUri, newUri);
+
+                        // Release permission
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT && !manager.hasImageUri(originalUri)) {
+                            try {
+                                getContentResolver().releasePersistableUriPermission(originalUri,
+                                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            } catch (SecurityException e) {
+                                // Ignore
+                            }
+                        }
+                    }
+                }
+                originalUri = null;
+            }
+        }
+
         if (requestCode == UCrop.REQUEST_CROP) {
             Log.d("CROP_DEBUG", "onActivityResult: Crop request finished with result code: " + resultCode);
             if (resultCode == RESULT_OK) {
@@ -468,6 +507,46 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         }
     }
 
+    private Uri saveVideoToMediaStore(Uri inputUri) {
+        ContentResolver resolver = getContentResolver();
+        String fileName = "editedVideo" + System.currentTimeMillis() + ".mp4";
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(MediaStore.Video.Media.DISPLAY_NAME, fileName);
+        contentValues.put(MediaStore.Video.Media.MIME_TYPE, "video/mp4");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            contentValues.put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/SlideshowWallpaper");
+            contentValues.put(MediaStore.Video.Media.IS_PENDING, 1);
+        }
+
+        Uri collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        Uri videoUri = resolver.insert(collection, contentValues);
+
+        if (videoUri != null) {
+            try (OutputStream os = resolver.openOutputStream(videoUri);
+                    InputStream is = resolver.openInputStream(inputUri)) {
+                if (os != null && is != null) {
+                    byte[] buffer = new byte[4096];
+                    int len;
+                    while ((len = is.read(buffer)) != -1) {
+                        os.write(buffer, 0, len);
+                    }
+                }
+            } catch (IOException e) {
+                Log.e(ImageListActivity.class.getSimpleName(), "Failed to save video to MediaStore", e);
+                resolver.delete(videoUri, null, null);
+                return null;
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentValues.clear();
+                contentValues.put(MediaStore.Video.Media.IS_PENDING, 0);
+                resolver.update(videoUri, contentValues, null, null);
+            }
+        }
+
+        return videoUri;
+    }
+
     private Uri saveImageToMediaStore(Uri inputUri) {
         ContentResolver resolver = getContentResolver();
         String fileName = "croppedImage" + System.currentTimeMillis() + ".jpg";
@@ -513,6 +592,15 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     public void onCrop(Uri uri) {
         Log.d("CROP_DEBUG", "onCrop: Cropping image with uri: " + uri.toString());
         this.originalUri = uri;
+
+        String mimeType = getContentResolver().getType(uri);
+        if (mimeType != null && mimeType.startsWith("video/")) {
+            Intent intent = new Intent(this, io.github.doubi88.slideshowwallpaper.VideoEditorActivity.class);
+            intent.putExtra(io.github.doubi88.slideshowwallpaper.VideoEditorActivity.EXTRA_VIDEO_URI, uri);
+            startActivityForResult(intent, REQUEST_CODE_VIDEO_EDIT);
+            return;
+        }
+
         UCrop.Options options = new UCrop.Options();
 
         int height, width;

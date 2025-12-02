@@ -37,9 +37,7 @@ public class SlideshowWallpaperService extends WallpaperService {
         private CurrentMediaHandler currentMediaHandler;
         private int width = 0;
         private int height = 0;
-        private final Paint imagePaint = new Paint();
-        private float deltaX = 0f;
-        private boolean isScrolling = false;
+        // Removed imagePaint - no longer using Canvas rendering
         private final SharedPreferencesManager manager;
         private GestureDetector gestureDetector;
         private boolean surfaceReady = false;
@@ -48,8 +46,7 @@ public class SlideshowWallpaperService extends WallpaperService {
             SharedPreferences prefs = SlideshowWallpaperService.this
                     .getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE);
             manager = new SharedPreferencesManager(prefs);
-            if (manager.getAntiAlias())
-                imagePaint.setAntiAlias(true);
+            // Removed imagePaint initialization - ExoPlayer handles all rendering
             initGestureDetector();
         }
 
@@ -100,6 +97,9 @@ public class SlideshowWallpaperService extends WallpaperService {
             super.onSurfaceCreated(holder);
             Log.d(TAG, "onSurfaceCreated");
             surfaceReady = true;
+            if (currentMediaHandler != null) {
+                currentMediaHandler.updateSurface(holder);
+            }
             if (isVisible() && currentMediaHandler != null) {
                 currentMediaHandler.resume(getApplicationContext());
             }
@@ -125,6 +125,7 @@ public class SlideshowWallpaperService extends WallpaperService {
                 currentMediaHandler.addNextMediaListener(this::displayCurrentMedia);
                 currentMediaHandler.updateAfter(getApplicationContext(), 0);
             } else {
+                currentMediaHandler.updateSurface(holder);
                 currentMediaHandler.setDimensions(width, height, getApplicationContext());
                 displayCurrentMedia(currentMediaHandler.getCurrentMedia());
             }
@@ -143,61 +144,11 @@ public class SlideshowWallpaperService extends WallpaperService {
         }
 
         private void displayCurrentMedia(MediaInfo media) {
-            handler.post(() -> {
-                if (!surfaceReady)
-                    return;
-                if (media != null && media.getImage() != null) {
-                    if (!media.isVideo() || !currentMediaHandler.isVideoPlaying())
-                        drawImage(media);
-                } else
-                    drawBlackScreen();
-            });
-        }
-
-        private void drawImage(MediaInfo media) {
-            if (media == null || media.getImage() == null) {
-                drawBlackScreen();
-                return;
-            }
-
-            SurfaceHolder holder = getSurfaceHolder();
-            Canvas canvas = null;
-            try {
-                canvas = holder.lockCanvas();
-                if (canvas == null)
-                    return;
-                Bitmap bitmap = media.getImage();
-                canvas.drawColor(Color.BLACK);
-                float scaleX = (float) width / bitmap.getWidth();
-                float scaleY = (float) height / bitmap.getHeight();
-                float scale = Math.max(scaleX, scaleY);
-                int scaledW = Math.round(bitmap.getWidth() * scale);
-                int scaledH = Math.round(bitmap.getHeight() * scale);
-                int left = (width - scaledW) / 2;
-                int top = (height - scaledH) / 2;
-                canvas.save();
-                canvas.translate(left, top);
-                canvas.scale(scale, scale);
-                canvas.drawBitmap(bitmap, 0, 0, imagePaint);
-                canvas.restore();
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1)
-                    notifyColorsChanged();
-            } finally {
-                if (canvas != null)
-                    holder.unlockCanvasAndPost(canvas);
-            }
-        }
-
-        private void drawBlackScreen() {
-            SurfaceHolder holder = getSurfaceHolder();
-            Canvas canvas = null;
-            try {
-                canvas = holder.lockCanvas();
-                if (canvas != null)
-                    canvas.drawColor(Color.BLACK);
-            } finally {
-                if (canvas != null)
-                    holder.unlockCanvasAndPost(canvas);
+            // ExoPlayer handles all rendering now (images and videos)
+            // No Canvas drawing needed!
+            // Just notify colors for system integration
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                handler.post(this::notifyColorsChanged);
             }
         }
 
@@ -223,13 +174,8 @@ public class SlideshowWallpaperService extends WallpaperService {
         @Override
         public void onOffsetsChanged(float xOffset, float yOffset, float xOffsetStep, float yOffsetStep,
                 int xPixelOffset, int yPixelOffset) {
-            if (currentMediaHandler != null && currentMediaHandler.getCurrentMedia() != null) {
-                MediaInfo currentMedia = currentMediaHandler.getCurrentMedia();
-                if (!currentMedia.isVideo()) {
-                    deltaX = xOffset * (currentMedia.getImage().getWidth() - width);
-                    displayCurrentMedia(currentMedia);
-                }
-            }
+            // ExoPlayer handles all rendering - no scrolling offset needed
+            // Images/videos are rendered by ExoPlayer which handles scaling automatically
         }
     }
 }
