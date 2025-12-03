@@ -40,13 +40,17 @@ object CropHelper {
         
         //Get screen dimensions
         val (width, height) = getScreenDimensions(context)
+
+        // Add Wallpaper option to the beginning of the list
+        val wallpaperRatio = "Wallpaper" to (width to height)
+        val allAspectRatios = listOf(wallpaperRatio) + aspectRatios
         
         // Set aspect ratio options
-        val aspectRatioArray = aspectRatios.map { (name, ratio) ->
+        val aspectRatioArray = allAspectRatios.map { (name, ratio) ->
             com.yalantis.ucrop.model.AspectRatio(name, ratio.first.toFloat(), ratio.second.toFloat())
         }.toTypedArray()
         
-        options.setAspectRatioOptions(1, *aspectRatioArray) // 1 = 9:16 default
+        options.setAspectRatioOptions(0, *aspectRatioArray) // 0 = Wallpaper default
         
         // Set colors to match Material 3 theme
         options.setToolbarColor(ContextCompat.getColor(context, R.color.primaryColor))

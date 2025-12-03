@@ -401,6 +401,50 @@ class GalleryViewModel(
             deselectAll()
         }
     }
+
+    fun refreshMediaItem(uri: Uri) {
+        viewModelScope.launch {
+            val currentItems = _uiState.value.mediaItems.toMutableList()
+            val index = currentItems.indexOfFirst { it.uri == uri }
+            
+            if (index != -1) {
+                // Refresh specific item
+                var name = currentItems[index].name
+                var lastModified = System.currentTimeMillis() // Assume modified now if we can't get it
+                
+                try {
+                    context.contentResolver.query(uri, arrayOf(
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.DATE_MODIFIED
+                    ), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                            val dateIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                            if (nameIndex != -1) name = cursor.getString(nameIndex) ?: name
+                            if (dateIndex != -1) lastModified = cursor.getLong(dateIndex)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("GalleryViewModel", "Error refreshing file info for $uri", e)
+                }
+                
+                val updatedItem = currentItems[index].copy(
+                    name = name,
+                    lastModified = lastModified
+                )
+                currentItems[index] = updatedItem
+                
+                // Re-sort if necessary (optional, but good for consistency)
+                val sortedItems = sortMediaItems(currentItems, _uiState.value.sortOption)
+                
+                _uiState.value = _uiState.value.copy(mediaItems = sortedItems)
+                Log.d("GalleryViewModel", "Refreshed single item: $uri")
+            } else {
+                Log.w("GalleryViewModel", "Item to refresh not found: $uri, reloading all")
+                loadMediaItems()
+            }
+        }
+    }
     
     private fun getFilteredMediaItems(): List<MediaItem> {
         return when (_uiState.value.currentFilter) {
