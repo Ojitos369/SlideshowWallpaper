@@ -1,7 +1,11 @@
 package io.github.doubi88.slideshowwallpaper.ui.screens
 
 import android.content.Context
+import android.database.ContentObserver
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -10,6 +14,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager
+import io.github.doubi88.slideshowwallpaper.ui.utils.MediaStoreHelper
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,20 +44,70 @@ class GalleryViewModel(
     private val _uiState = MutableStateFlow(GalleryUiState())
     val uiState: StateFlow<GalleryUiState> = _uiState.asStateFlow()
     
+    // Track processed shared URIs to prevent re-adding on navigation
+    private var processedSharedUris: Set<Uri> = emptySet()
+    
+    // ContentObserver for external changes to LumaLoop album
+    private val albumContentObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean, uri: Uri?) {
+            super.onChange(selfChange, uri)
+            Log.d("GalleryViewModel", "MediaStore changed, refreshing gallery")
+            syncWithAlbum()
+        }
+    }
+    
     init {
+        // Register ContentObserver for MediaStore changes
+        context.contentResolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            true,
+            albumContentObserver
+        )
+        context.contentResolver.registerContentObserver(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            true,
+            albumContentObserver
+        )
+        
         loadMediaItems()
+        // Migrate from private storage to public album if needed
+        migrateToPublicAlbum()
+        // Clean up duplicates and invalid URIs
+        cleanupDuplicates()
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        context.contentResolver.unregisterContentObserver(albumContentObserver)
     }
     
     fun loadMediaItems() {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true)
-            val uris = preferencesManager.getImageUris(SharedPreferencesManager.Ordering.SELECTION)
-            val mediaItems = uris.map { uri ->
-                MediaItem(uri = uri, isVideo = isVideoUri(uri))
+            val uris = preferencesManager.getImageUris(
+                io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION
+            )
+            
+            // Validate URIs - remove if file doesn't exist
+            val validUris = uris.filter { uri ->
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { true } ?: false
+                } catch (e: Exception) {
+                    Log.w("GalleryViewModel", "Invalid URI, removing: $uri")
+                    preferencesManager.removeUri(uri)
+                    false
+                }
             }
+            
+            val mediaItems = validUris.map { uri ->
+                MediaItem(
+                    uri = uri,
+                    isVideo = isVideoUri(uri)
+                )
+            }
+            
             _uiState.value = _uiState.value.copy(
                 mediaItems = mediaItems,
-                isLoading = false
+                selectedItems = emptySet()
             )
         }
     }
@@ -68,11 +123,19 @@ class GalleryViewModel(
         )
     }
     
+    fun removeItemByUri(uri: Uri) {
+        viewModelScope.launch {
+            preferencesManager.removeUri(uri)
+            loadMediaItems()
+        }
+    }
+    
     fun selectAll() {
-        val visibleItems = getFilteredMediaItems()
-        _uiState.value = _uiState.value.copy(
-            selectedItems = visibleItems.map { it.uri }.toSet()
-        )
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                selectedItems = _uiState.value.mediaItems.map { it.uri }.toSet()
+            )
+        }
     }
     
     fun deselectAll() {
@@ -88,22 +151,179 @@ class GalleryViewModel(
     
     fun addMediaItems(uris: List<Uri>) {
         viewModelScope.launch {
-            uris.forEach { originalUri ->
-                // Copy to private storage first
-                val privateCopy = io.github.doubi88.slideshowwallpaper.ui.utils.FileHelper.copyToPrivateStorage(context, originalUri)
-                if (privateCopy != null) {
-                    preferencesManager.addUri(privateCopy)
-                } else {
-                    Log.e("GalleryViewModel", "Failed to copy file: $originalUri")
+            _uiState.value = _uiState.value.copy(isLoading = true)
+            try {
+                // Get current URIs to prevent duplicates
+                val currentUris = preferencesManager.getImageUris(
+                    io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION
+                ).toSet()
+                
+                uris.forEach { originalUri ->
+                    // Skip if already exists
+                    if (originalUri in currentUris) {
+                        Log.d("GalleryViewModel", "URI already exists, skipping: $originalUri")
+                        return@forEach
+                    }
+                    
+                    try {
+                        // Copy to public MediaStore album
+                        val albumUri = MediaStoreHelper.copyToPublicAlbum(context, originalUri)
+                        val uriToSave = albumUri ?: originalUri // Fallback
+                        
+                        // Double-check again before adding
+                        if (uriToSave !in currentUris) {
+                            preferencesManager.addUri(uriToSave)
+                            Log.d("GalleryViewModel", "Added URI: $uriToSave")
+                        }
+                        
+                        if (albumUri == null) {
+                            Log.w("GalleryViewModel", "Failed to copy to album, using original: $originalUri")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("GalleryViewModel", "Error adding media: $originalUri", e)
+                        try {
+                            if (originalUri !in currentUris) {
+                                preferencesManager.addUri(originalUri)
+                            }
+                        } catch (e2: Exception) {
+                            Log.e("GalleryViewModel", "Failed to add original URI too", e2)
+                        }
+                    }
                 }
+                loadMediaItems()
+            } finally {
+                _uiState.value = _uiState.value.copy(isLoading = false)
             }
-            loadMediaItems()
+        }
+    }
+    
+    // Process shared media with duplication prevention
+    fun processSharedMedia(sharedUris: List<Uri>) {
+        val newUris = sharedUris.filterNot { it in processedSharedUris }
+        if (newUris.isNotEmpty()) {
+            processedSharedUris = processedSharedUris + newUris.toSet()
+            Log.d("GalleryViewModel", "Processing ${newUris.size} new shared URIs")
+            addMediaItems(newUris)
+        } else {
+            Log.d("GalleryViewModel", "All ${sharedUris.size} URIs already processed, skipping")
+        }
+    }
+    
+    private fun migrateToPublicAlbum() {
+        viewModelScope.launch {
+            try {
+                val privateDir = java.io.File(context.filesDir, "slideshow_media")
+                if (!privateDir.exists() || privateDir.listFiles()?.isEmpty() == true) {
+                    Log.d("GalleryViewModel", "No private files to migrate")
+                    return@launch
+                }
+                
+                Log.d("GalleryViewModel", "Starting migration from private storage...")
+                val migratedUris = mutableListOf<Uri>()
+                
+                privateDir.listFiles()?.forEach { file ->
+                    try {
+                        val fileUri = Uri.fromFile(file)
+                        val albumUri = MediaStoreHelper.copyToPublicAlbum(context, fileUri)
+                        
+                        if (albumUri != null) {
+                            migratedUris.add(albumUri)
+                            file.delete() // Remove from private storage
+                            Log.d("GalleryViewModel", "Migrated: ${file.name}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e("GalleryViewModel", "Failed to migrate: ${file.name}", e)
+                    }
+                }
+                
+                // Update SharedPreferences with new URIs
+                if (migratedUris.isNotEmpty()) {
+                    // Remove old private file:// URIs
+                    val oldUris = preferencesManager.getImageUris(io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION)
+                    oldUris.forEach { preferencesManager.removeUri(it) }
+                    
+                    // Add new album URIs
+                    migratedUris.forEach { preferencesManager.addUri(it) }
+                    loadMediaItems()
+                    Log.d("GalleryViewModel", "Migration complete: ${migratedUris.size} files")
+                }
+            } catch (e: Exception) {
+                Log.e("GalleryViewModel", "Migration error", e)
+            }
+        }
+    }
+    
+    private fun syncWithAlbum() {
+        viewModelScope.launch {
+            try {
+                // Get all files currently in LumaLoop album
+                val albumUris = MediaStoreHelper.getAlbumContent(context)
+                val savedUris = preferencesManager.getImageUris(
+                    io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION
+                )
+                
+                // Remove URIs that are no longer in album
+                savedUris.forEach { uri ->
+                    if (uri !in albumUris && uri.toString().contains("LumaLoop")) {
+                        Log.d("GalleryViewModel", "File deleted externally, removing: $uri")
+                        preferencesManager.removeUri(uri)
+                    }
+                }
+                
+                // Optionally: auto-add new files found in album
+                // (Commented out - user can manually add if needed)
+                // albumUris.forEach { uri ->
+                //     if (uri !in savedUris) {
+                //         preferencesManager.addUri(uri)
+                //     }
+                // }
+                
+                loadMediaItems()
+            } catch (e: Exception) {
+                Log.e("GalleryViewModel", "Sync error", e)
+            }
+        }
+    }
+    
+    private fun cleanupDuplicates() {
+        viewModelScope.launch {
+            try {
+                val savedUris = preferencesManager.getImageUris(
+                    io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION
+                ).toSet() // Convert to Set to find duplicates
+                
+                val originalSize = preferencesManager.getImageUris(
+                    io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION
+                ).size
+                
+                if (savedUris.size < originalSize) {
+                    Log.d("GalleryViewModel", "Found duplicates, cleaning up...")
+                    // Remove all and re-add unique ones
+                    val allUris = preferencesManager.getImageUris(
+                        io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager.Ordering.SELECTION
+                    )
+                    allUris.forEach { preferencesManager.removeUri(it) }
+                    savedUris.forEach { preferencesManager.addUri(it) }
+                    loadMediaItems()
+                }
+            } catch (e: Exception) {
+                Log.e("GalleryViewModel", "Cleanup error", e)
+            }
         }
     }
     
     fun removeSelectedItems() {
         viewModelScope.launch {
             _uiState.value.selectedItems.forEach { uri ->
+                try {
+                    // Delete physical file from MediaStore/LumaLoop
+                    context.contentResolver.delete(uri, null, null)
+                    Log.d("GalleryViewModel", "Deleted file from storage: $uri")
+                } catch (e: Exception) {
+                    Log.e("GalleryViewModel", "Failed to delete file: $uri", e)
+                }
+                
+                // Remove from preferences
                 preferencesManager.removeUri(uri)
             }
             loadMediaItems()

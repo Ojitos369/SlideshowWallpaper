@@ -40,6 +40,7 @@ fun MediaCard(
     uri: Uri,
     isSelected: Boolean = false,
     isVideo: Boolean = false,
+    thumbnailRatio: String = "3:4",
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onFullscreenClick: () -> Unit = {},
@@ -66,16 +67,28 @@ fun MediaCard(
         label = "scale_animation"
     )
     
+    // Calculate aspect ratio from thumbnailRatio string
+    val aspectRatio = when (thumbnailRatio) {
+        "9:16" -> 9f / 16f
+        "16:9" -> 16f / 9f
+        "3:4" -> 3f / 4f
+        "4:3" -> 4f / 3f
+        "1:1" -> 1f
+        "Natural" -> null
+        else -> 3f / 4f  // Default
+    }
+    
     Card(
         modifier = modifier
-            .scale(scale)
+            .then(if (aspectRatio != null) Modifier.aspectRatio(aspectRatio) else Modifier)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onFullscreenClick()
+                    onLongClick()
                 }
-            ),
+            )
+            .scale(scale),
         shape = RoundedCornerShape(24.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 8.dp else 2.dp),
         border = if (isSelected) BorderStroke(3.dp, MaterialTheme.colorScheme.primary) else null

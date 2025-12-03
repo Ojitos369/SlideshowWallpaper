@@ -19,7 +19,7 @@
  */
 -->
 <resources>
-    <string name="app_name">Slideshow Wallpaper</string>
+    <string name="app_name">LumaLoop</string>
     <string name="preference_edit_image_list">Images</string>
     <string name="preference_ordering">Ordering</string>
     <string name="error_reading_file">Error reading file</string>

@@ -1,9 +1,12 @@
 package io.github.doubi88.slideshowwallpaper.ui.components
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Crop
@@ -32,6 +35,7 @@ object CropHelper {
             "1:1" to (1 to 1)
         )
     ) {
+        Log.d("CropHelper", "launchCrop called with sourceUri: $sourceUri")
         val options = UCrop.Options()
         
         //Get screen dimensions
@@ -49,10 +53,11 @@ object CropHelper {
         options.setStatusBarColor(ContextCompat.getColor(context, R.color.primaryDarkColor))
         options.setActiveControlsWidgetColor(ContextCompat.getColor(context, R.color.primaryColor))
         
-        // Create destination file
-        val destinationFileName = "cropped_${System.currentTimeMillis()}.jpg"
-        val destinationFile = File(context.cacheDir, destinationFileName)
-        val destinationUri = Uri.fromFile(destinationFile)
+        // Create temporary destination in cache
+        val destinationFileName = "crop_temp_${System.currentTimeMillis()}.jpg"
+        val cacheFile = File(context.cacheDir, destinationFileName)
+        val destinationUri = Uri.fromFile(cacheFile)
+        Log.d("CropHelper", "Destination URI created: $destinationUri")
         
         // Create UCrop intent
         val uCrop = UCrop.of(sourceUri, destinationUri)
@@ -60,6 +65,7 @@ object CropHelper {
             .withOptions(options)
         
         val intent = uCrop.getIntent(context)
+        Log.d("CropHelper", "Launching UCrop intent")
         cropLauncher.launch(intent)
     }
     

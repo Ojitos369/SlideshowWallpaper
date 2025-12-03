@@ -1,11 +1,21 @@
 package io.github.doubi88.slideshowwallpaper.ui.screens
 
+import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
@@ -17,6 +27,7 @@ import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
@@ -25,9 +36,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager
 import io.github.doubi88.slideshowwallpaper.ui.components.MediaCard
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import io.github.doubi88.slideshowwallpaper.ui.components.FullscreenImageDialog
 import io.github.doubi88.slideshowwallpaper.ui.components.VideoPlayerDialog
 import io.github.doubi88.slideshowwallpaper.ui.components.CropHelper
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.ui.zIndex
 import com.yalantis.ucrop.UCrop
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -53,7 +69,7 @@ fun GalleryScreen(
     var videoPlayerUri by remember { mutableStateOf<Uri?>(null) }
     
     // Crop state
-    var uriToCrop by remember { mutableStateOf<Uri?>(null) }
+    var uriToCrop by rememberSaveable { mutableStateOf<Uri?>(null) }
     
     val context = LocalContext.current
     
@@ -67,26 +83,235 @@ fun GalleryScreen(
         }
     )
     
-    // Handle shared media from intent
-    LaunchedEffect(sharedUris) {
-        if (!sharedUris.isNullOrEmpty()) {
-            viewModel.addMediaItems(sharedUris)
+    // Permission launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val allGranted = permissions.values.all { it }
+        if (allGranted) {
+            Log.d("GalleryScreen", "Storage permissions granted")
+        } else {
+            Log.w("GalleryScreen", "Storage permissions denied")
+            // TODO: Show explanation to user
         }
     }
     
+    // Request permissions on first launch
+    val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO
+        )
+    } else {
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    
+    LaunchedEffect(Unit) {
+        // Check if permissions already granted
+        val needsPermission = permissions.any {
+            context.checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+        }
+        
+        if (needsPermission) {
+            permissionLauncher.launch(permissions)
+        }
+    }
+    
+    // Handle shared media from intent - delegate to ViewModel
+    LaunchedEffect(sharedUris) {
+        if (!sharedUris.isNullOrEmpty()) {
+            viewModel.processSharedMedia(sharedUris)
+        }
+    }
+    val coroutineScope = rememberCoroutineScope()
+    
+    // Pending overwrite state for permission requests
+    var pendingOverwrite by remember { mutableStateOf<Pair<Uri, Uri>?>(null) }
+    
+    // Intent sender launcher for RecoverableSecurityException
+    val intentSenderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            pendingOverwrite?.let { (sourceUri, targetUri) ->
+                coroutineScope.launch {
+                    try {
+                         // Retry overwrite
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                                context.contentResolver.openOutputStream(targetUri, "w")?.use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            // Delete temp file
+                            try { File(sourceUri.path!!).delete() } catch (e: Exception) {}
+                        }
+                        
+                        // Force update
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 1) }
+                                context.contentResolver.update(targetUri, values, null, null)
+                                values.clear()
+                                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                                context.contentResolver.update(targetUri, values, null, null)
+                            }
+                        } catch (e: Exception) { Log.e("GalleryScreen", "Failed to update metadata", e) }
+                        
+                        delay(500)
+                        viewModel.loadMediaItems()
+                        Log.d("GalleryScreen", "Overwrite successful after permission grant")
+                    } catch (e: Exception) {
+                        Log.e("GalleryScreen", "Failed to overwrite after permission grant", e)
+                    }
+                    pendingOverwrite = null
+                }
+            }
+        } else {
+            pendingOverwrite = null
+        }
+    }
+
+    // Launcher for MANAGE_EXTERNAL_STORAGE intent
+    val manageStorageLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Check if permission is granted after returning from settings
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (android.os.Environment.isExternalStorageManager()) {
+                Log.d("GalleryScreen", "MANAGE_EXTERNAL_STORAGE granted")
+            } else {
+                Log.d("GalleryScreen", "MANAGE_EXTERNAL_STORAGE denied")
+            }
+        }
+    }
+
     // Crop launcher
     val cropLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
+        Log.d("GalleryScreen", "Crop result code: ${result.resultCode}")
         if (result.resultCode == Activity.RESULT_OK) {
             val resultUri = UCrop.getOutput(result.data!!)
+            Log.d("GalleryScreen", "Crop result URI: $resultUri, Target URI: $uriToCrop")
+            
             if (resultUri != null && uriToCrop != null) {
-                viewModel.replaceMedia(uriToCrop!!, resultUri)
-                uriToCrop = null
+                val targetUri = uriToCrop!!
+                coroutineScope.launch {
+                    try {
+                        Log.d("GalleryScreen", "Starting overwrite operation...")
+                        // Overwrite original file
+                        withContext(Dispatchers.IO) {
+                            try {
+                                val inputStream = context.contentResolver.openInputStream(resultUri)
+                                var outputStream: java.io.OutputStream? = null
+                                try {
+                                    outputStream = context.contentResolver.openOutputStream(targetUri, "w")
+                                } catch (e: Exception) {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && e is android.app.RecoverableSecurityException) {
+                                        // If we have MANAGE_EXTERNAL_STORAGE, this shouldn't happen, but just in case
+                                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !android.os.Environment.isExternalStorageManager()) {
+                                             Log.d("GalleryScreen", "Caught RecoverableSecurityException, requesting MANAGE_EXTERNAL_STORAGE")
+                                             val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                                             intent.data = Uri.parse("package:${context.packageName}")
+                                             manageStorageLauncher.launch(intent)
+                                             return@withContext
+                                         }
+                                        
+                                        Log.d("GalleryScreen", "Caught RecoverableSecurityException, requesting permission")
+                                        pendingOverwrite = resultUri to targetUri
+                                        val intentSender = e.userAction.actionIntent.intentSender
+                                        val intent = androidx.activity.result.IntentSenderRequest.Builder(intentSender).build()
+                                        intentSenderLauncher.launch(intent)
+                                        return@withContext
+                                    } else {
+                                        Log.w("GalleryScreen", "Failed to open output stream with 'w', trying 'wt'", e)
+                                        try {
+                                            outputStream = context.contentResolver.openOutputStream(targetUri, "wt")
+                                        } catch (e2: Exception) {
+                                            Log.e("GalleryScreen", "Failed to open output stream with 'wt'", e2)
+                                        }
+                                    }
+                                }
+                                
+                                if (inputStream != null && outputStream != null) {
+                                    inputStream.use { input ->
+                                        outputStream.use { output ->
+                                            input.copyTo(output)
+                                        }
+                                    }
+                                    Log.d("GalleryScreen", "File overwritten successfully")
+                                    
+                                    // Delete temp file
+                                    try { File(resultUri.path!!).delete() } catch (e: Exception) {}
+                                    
+                                    // Force update
+                                    withContext(Dispatchers.Main) {
+                                        // Force MediaStore update for the original URI
+                                        // Use MediaScannerConnection to force a re-scan of the file
+                                        val path = io.github.doubi88.slideshowwallpaper.ui.utils.MediaStoreHelper.getRealPathFromUri(context, targetUri)
+                                        if (path != null) {
+                                            android.media.MediaScannerConnection.scanFile(
+                                                context,
+                                                arrayOf(path),
+                                                arrayOf("image/jpeg"), // Assuming JPEG for now, ideally get from MIME type
+                                                null
+                                            )
+                                            Log.d("GalleryScreen", "Triggered MediaScannerConnection for $path")
+                                        } else {
+                                            Log.w("GalleryScreen", "Could not get real path for $targetUri, fallback to reload")
+                                        }
+                                        
+                                        // Clear Coil cache to force immediate update
+                                        val imageLoader = coil.Coil.imageLoader(context)
+                                        imageLoader.memoryCache?.remove(coil.memory.MemoryCache.Key(targetUri.toString()))
+                                        imageLoader.diskCache?.remove(targetUri.toString())
+                                        Log.d("GalleryScreen", "Cleared Coil cache for $targetUri")
+
+                                        delay(1000) // Wait a bit longer for the scanner
+                                        viewModel.loadMediaItems()
+                                    }
+                                } else {
+                                    Log.e("GalleryScreen", "Failed to open streams. Input: $inputStream, Output: $outputStream")
+                                }
+                            } catch (e: Exception) {
+                                Log.e("GalleryScreen", "Error in crop flow", e)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("GalleryScreen", "Error in crop flow", e)
+                    }
+                }
+            } else {
+                 Log.e("GalleryScreen", "Missing URIs. Result: $resultUri, Target: $uriToCrop")
             }
+            uriToCrop = null
+        } else if (result.resultCode == Activity.RESULT_CANCELED) {
+             Log.d("GalleryScreen", "Crop cancelled")
+             val resultUri = UCrop.getOutput(result.data ?: Intent())
+             if (resultUri != null) {
+                 try { File(resultUri.path!!).delete() } catch (e: Exception) {}
+             }
+            uriToCrop = null
+        } else {
+            Log.e("GalleryScreen", "Crop failed with result code: ${result.resultCode}")
+            uriToCrop = null
         }
     }
-    
+    // Loading indicator
+    if (uiState.isLoading) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f))
+                .zIndex(10f) // Ensure it's on top
+                .clickable(enabled = false) {}, // Block touches
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+        }
+    }
+
     Scaffold(
         topBar = {
             // Filter chips
@@ -126,15 +351,11 @@ fun GalleryScreen(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        if (uiState.selectedItems.isEmpty()) {
-                            TextButton(onClick = { viewModel.selectAll() }) {
-                                Text("Select All")
-                            }
+                        TextButton(onClick = { viewModel.selectAll() }) {
+                            Text("Select All")
                         }
-                        else {
-                            TextButton(onClick = { viewModel.deselectAll() }) {
-                                Text("Deselect All")
-                            }
+                        TextButton(onClick = { viewModel.deselectAll() }) {
+                            Text("Deselect All")
                         }
                     }
                 }
@@ -212,18 +433,22 @@ fun GalleryScreen(
                 5 -> 72.dp
                 else -> 120.dp
             }
-            
+            // Media grid
             LazyVerticalStaggeredGrid(
                 columns = StaggeredGridCells.Adaptive(minSize = columnSize),
-                    contentPadding = PaddingValues(
-                        start = 8.dp,
-                        end = 8.dp,
-                        top = paddingValues.calculateTopPadding() + 8.dp,
-                        bottom = paddingValues.calculateBottomPadding() + 8.dp
-                    ),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalItemSpacing = 8.dp,
-                    modifier = Modifier.fillMaxSize()
+                contentPadding = PaddingValues(
+                    start = 8.dp,
+                    end = 8.dp,
+                    top = if (uiState.selectedItems.isNotEmpty()) {
+                        paddingValues.calculateTopPadding() + 68.dp
+                    } else {
+                        paddingValues.calculateTopPadding() + 8.dp
+                    },
+                    bottom = paddingValues.calculateBottomPadding() + 8.dp
+                ),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalItemSpacing = 8.dp,
+                modifier = Modifier.fillMaxSize()
             ) {
                 items(
                     items = filteredItems,
@@ -233,14 +458,12 @@ fun GalleryScreen(
                             uri = mediaItem.uri,
                             isSelected = mediaItem.uri in uiState.selectedItems,
                             isVideo = mediaItem.isVideo,
+                            thumbnailRatio = thumbnailRatio,
                             onClick = {
                                 // Tap = select/unselect
                                 viewModel.toggleSelection(mediaItem.uri)
                             },
                             onLongClick = {
-                                // No longer needed - handled by MediaCard
-                            },
-                            onFullscreenClick = {
                                 // Long press opens fullscreen
                                 if (mediaItem.isVideo) {
                                     videoPlayerUri = mediaItem.uri
@@ -250,8 +473,33 @@ fun GalleryScreen(
                             },
                             onCropClick = if (!mediaItem.isVideo) {
                                 {
-                                    uriToCrop = mediaItem.uri
-                                    CropHelper.launchCrop(context, mediaItem.uri, cropLauncher)
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !android.os.Environment.isExternalStorageManager()) {
+                                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                                        intent.data = Uri.parse("package:${context.packageName}")
+                                        manageStorageLauncher.launch(intent)
+                                    } else {
+                                        // Create a temp file for cropping
+                                        val destinationFileName = "lumaloop_cropped_${System.currentTimeMillis()}.jpg"
+                                        val cacheFile = File(context.cacheDir, destinationFileName)
+                                        val destinationUri = Uri.fromFile(cacheFile)
+                                        
+                                        val options = UCrop.Options()
+                                        options.setAspectRatioOptions(0,
+                                            com.yalantis.ucrop.model.AspectRatio("Original", 0f, 0f),
+                                            com.yalantis.ucrop.model.AspectRatio("9:16", 9f, 16f),
+                                            com.yalantis.ucrop.model.AspectRatio("16:9", 16f, 9f),
+                                            com.yalantis.ucrop.model.AspectRatio("1:1", 1f, 1f),
+                                            com.yalantis.ucrop.model.AspectRatio("3:4", 3f, 4f),
+                                            com.yalantis.ucrop.model.AspectRatio("4:3", 4f, 3f)
+                                        )
+
+                                        val uCrop = UCrop.of(mediaItem.uri, destinationUri)
+                                            .withOptions(options)
+                                            .withMaxResultSize(1080, 1920)
+
+                                        uriToCrop = mediaItem.uri
+                                        cropLauncher.launch(uCrop.getIntent(context))
+                                    }
                                 }
                             } else null,
                             modifier = Modifier.fillMaxWidth()

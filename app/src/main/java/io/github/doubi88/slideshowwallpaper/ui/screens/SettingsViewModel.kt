@@ -7,8 +7,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class SettingsUiState(
-    val interval: Int = 10,
-    val isMuted: Boolean = false,
+    val interval: Int = 5,
+    val muteVideos: Boolean = false,
     val playbackOrder: String = "Sequential",
     val displayMode: String = "Fit",
     val swipeToChange: Boolean = false,
@@ -28,31 +28,15 @@ class SettingsViewModel(
     }
     
     private fun loadSettings() {
-        // Load actual values from SharedPreferences
-        val interval = try {
-            preferencesManager.secondsBetweenImages
-        } catch (e: Exception) {
-            10
-        }
-        
-        val isMuted = preferencesManager.muteVideos
-        val swipeToChange = preferencesManager.swipeToChange
-        
-        // For now, playbackOrder and displayMode don't have direct getters in Java code
-        // They use resource-based values, so we'll use defaults
-        // The wallpaper service uses getCurrentOrdering() and getTooWideImagesRule()
-        
-        val galleryColumns = preferencesManager.preferences.getInt("gallery_columns", 3)
-        val thumbnailRatio = preferencesManager.preferences.getString("thumbnail_ratio", "3:4") ?: "3:4"
-        
-        _uiState.value = SettingsUiState(
-            interval = interval,
-            isMuted = isMuted,
-            playbackOrder = "Sequential", // Would need to map from getCurrentOrdering()
-            displayMode = "Fit", // Would need to map from getTooWideImagesRule()
-            swipeToChange = swipeToChange,
-            galleryColumns = galleryColumns,
-            thumbnailRatio = thumbnailRatio
+        val prefs = preferencesManager.preferences
+        _uiState.value = _uiState.value.copy(
+            interval = preferencesManager.secondsBetweenImages,
+            muteVideos = preferencesManager.muteVideos,
+            playbackOrder = "Sequential", // Simplified for now
+            displayMode = "Fit", // Simplified for now
+            swipeToChange = preferencesManager.swipeToChange,
+            galleryColumns = prefs.getInt("gallery_columns", 3),
+            thumbnailRatio = prefs.getString("thumbnail_ratio", "3:4") ?: "3:4"
         )
     }
     
@@ -61,10 +45,8 @@ class SettingsViewModel(
         preferencesManager.secondsBetweenImages = interval
     }
     
-    fun setMuted(muted: Boolean) {
-        _uiState.value = _uiState.value.copy(isMuted = muted)
-        // Note: SharedPreferencesManager doesn't have setMuteVideos()
-        // Would need to add it or use direct SharedPreferences access
+    fun setMuteVideos(muted: Boolean) {
+        _uiState.value = _uiState.value.copy(muteVideos = muted)
         preferencesManager.preferences.edit()
             .putBoolean("mute_videos", muted)
             .apply()
@@ -72,11 +54,8 @@ class SettingsViewModel(
     
     fun setPlaybackOrder(order: String) {
         _uiState.value = _uiState.value.copy(playbackOrder = order)
-        // Map to the resource value used by SharedPreferencesManager
-        // Sequential = "selection", Random = "random"
         val value = when (order) {
             "Random" -> "random"
-            "Shuffle" -> "random" // Treating shuffle as random for now
             else -> "selection"
         }
         preferencesManager.preferences.edit()
@@ -86,7 +65,6 @@ class SettingsViewModel(
     
     fun setDisplayMode(mode: String) {
         _uiState.value = _uiState.value.copy(displayMode = mode)
-        // Map to TooWideImagesRule values
         // This would need proper mapping to resource values
         // For now, just updating state
     }

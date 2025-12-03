@@ -3,6 +3,8 @@ package io.github.doubi88.slideshowwallpaper.ui.screens
 import android.app.Activity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,6 +18,7 @@ import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager
 import io.github.doubi88.slideshowwallpaper.ui.components.IntervalBottomSheet
 import io.github.doubi88.slideshowwallpaper.ui.components.PlaybackOrderBottomSheet
 import io.github.doubi88.slideshowwallpaper.ui.components.DisplayModeBottomSheet
+import io.github.doubi88.slideshowwallpaper.ui.components.ThumbnailRatioBottomSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -36,10 +39,12 @@ fun SettingsScreen(
     var showIntervalSheet by remember { mutableStateOf(false) }
     var showPlaybackOrderSheet by remember { mutableStateOf(false) }
     var showDisplayModeSheet by remember { mutableStateOf(false) }
+    var showThumbnailRatioSheet by remember { mutableStateOf(false) }
     
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(vertical = 8.dp)
     ) {
         // Header
@@ -78,15 +83,15 @@ fun SettingsScreen(
             supportingContent = { Text("Play videos without sound") },
             leadingContent = {
                 Icon(
-                    if (uiState.isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                    if (uiState.muteVideos) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
                 )
             },
             trailingContent = {
                 Switch(
-                    checked = uiState.isMuted,
-                    onCheckedChange = { viewModel.setMuted(it) }
+                    checked = uiState.muteVideos,
+                    onCheckedChange = { viewModel.setMuteVideos(it) }
                 )
             }
         )
@@ -179,8 +184,23 @@ fun SettingsScreen(
             value = uiState.galleryColumns.toFloat(),
             onValueChange = { viewModel.setGalleryColumns(it.toInt()) },
             valueRange = 2f..5f,
-            steps = 2,
+            steps = 3,
             modifier = Modifier.padding(horizontal = 16.dp)
+        )
+        
+        HorizontalDivider()
+        
+        // Thumbnail Ratio Setting
+        ListItem(
+            headlineContent = { Text("Thumbnail Aspect Ratio") },
+            supportingContent = { Text(uiState.thumbnailRatio) },
+            leadingContent = {
+                Icon(
+                    Icons.Default.PhotoSizeSelectLarge,
+                    contentDescription = null
+                )
+            },
+            modifier = Modifier.clickable { showThumbnailRatioSheet = true }
         )
         
         HorizontalDivider()
@@ -196,20 +216,20 @@ fun SettingsScreen(
             shape = MaterialTheme.shapes.medium
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.padding(16.dp)
             ) {
                 Text(
-                    text = "About",
-                    style = MaterialTheme.typography.titleMedium
+                    text = "LumaLoop",
+                    style = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.padding(bottom = 4.dp)
                 )
                 Text(
-                    text = "Slideshow Wallpaper",
+                    text = "Version 1.3.0",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "Version 1.2.8",
+                    text = "Dynamic wallpaper slideshow app",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -249,6 +269,14 @@ fun SettingsScreen(
                 viewModel.setDisplayMode(newMode)
                 showDisplayModeSheet = false
             }
+        )
+    }
+
+    if (showThumbnailRatioSheet) {
+        ThumbnailRatioBottomSheet(
+            selectedRatio = uiState.thumbnailRatio,
+            onRatioSelected = { viewModel.setThumbnailRatio(it) },
+            onDismiss = { showThumbnailRatioSheet = false }
         )
     }
 }

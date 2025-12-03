@@ -76,6 +76,7 @@ public class CurrentMediaHandler {
     private SurfaceTexture videoSurfaceTexture;
     private Surface videoSurface;
     private ExecutorService imageExecutor = Executors.newSingleThreadExecutor();
+    private Runnable imageTimerRunnable;
 
     public interface NextMediaListener {
         void nextMedia(MediaInfo media);
@@ -182,11 +183,19 @@ public class CurrentMediaHandler {
 
                                     // Simulate playback duration for image
                                     long durationMs = getImageDurationMs();
-                                    new Handler().postDelayed(() -> {
+
+                                    // Cancel previous timer if any
+                                    if (imageTimerRunnable != null) {
+                                        mainHandler.removeCallbacks(imageTimerRunnable);
+                                    }
+
+                                    imageTimerRunnable = () -> {
                                         if (!isVideoPlaying && !isPaused) {
                                             forceNextMedia(context);
                                         }
-                                    }, durationMs);
+                                    };
+
+                                    mainHandler.postDelayed(imageTimerRunnable, durationMs);
                                 }
                             });
                         }
@@ -274,6 +283,9 @@ public class CurrentMediaHandler {
 
     public void pause() {
         isPaused = true;
+        if (imageTimerRunnable != null) {
+            mainHandler.removeCallbacks(imageTimerRunnable);
+        }
         if (exoPlayer != null && exoPlayer.isPlaying()) {
             exoPlayer.pause();
         }
@@ -302,6 +314,9 @@ public class CurrentMediaHandler {
     public void stop() {
         Log.d(TAG, "stop() called");
         runnable = false;
+        if (imageTimerRunnable != null) {
+            mainHandler.removeCallbacks(imageTimerRunnable);
+        }
         if (exoPlayer != null) {
             try {
                 Log.d(TAG, "Stopping and releasing ExoPlayer");
@@ -353,6 +368,10 @@ public class CurrentMediaHandler {
     public void forceNextMedia(Context context) {
         synchronized (lock) {
             if (runnable) {
+                // Cancel pending timer to prevent accumulation
+                if (imageTimerRunnable != null) {
+                    mainHandler.removeCallbacks(imageTimerRunnable);
+                }
                 // Use a Handler to avoid Thread issues if called from background
                 mainHandler.post(() -> {
                     try {
@@ -368,6 +387,10 @@ public class CurrentMediaHandler {
     public void forcePreviousMedia(Context context) {
         synchronized (lock) {
             if (runnable) {
+                // Cancel pending timer to prevent accumulation
+                if (imageTimerRunnable != null) {
+                    mainHandler.removeCallbacks(imageTimerRunnable);
+                }
                 // Use a Handler to avoid Thread issues if called from background
                 mainHandler.post(() -> {
                     try {
