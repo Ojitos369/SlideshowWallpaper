@@ -31,8 +31,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.util.Log;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import android.widget.TextView;
+import com.google.android.material.chip.ChipGroup;
 
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
@@ -83,6 +86,16 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     private static final int REQUEST_CODE_VIDEO_EDIT = 2;
 
     private ImageListAdapter imageListAdapter;
+    private ChipGroup filterChipGroup;
+    private TextView selectionCountText;
+    private View emptyState;
+    private TextView emptyStateText;
+
+    public enum MediaFilter {
+        ALL, IMAGES_ONLY, VIDEOS_ONLY
+    }
+
+    private MediaFilter currentFilter = MediaFilter.ALL;
 
     private FloatingActionButton removeButton;
     private Uri originalUri;
@@ -112,6 +125,10 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
         setContentView(R.layout.image_list);
 
         this.removeButton = findViewById(R.id.delete_button);
+        this.filterChipGroup = findViewById(R.id.filter_chip_group);
+        this.selectionCountText = findViewById(R.id.selection_count_text);
+        this.emptyState = findViewById(R.id.empty_state);
+        this.emptyStateText = findViewById(R.id.empty_state_text);
 
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         RecyclerView recyclerView = findViewById(R.id.image_list);
@@ -139,14 +156,28 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
             @Override
             public void onSelectionChanged(HashSet<ImageInfo> setInfo) {
                 Log.d(ImageListActivity.class.getSimpleName(), setInfo.size() + " image(s) selected");
-                if (setInfo.size() > 0) {
-                    removeButton.setVisibility(View.VISIBLE);
-                } else {
-                    removeButton.setVisibility(View.GONE);
-                }
+                updateSelectionUI(setInfo.size());
             }
         });
         recyclerView.setAdapter(imageListAdapter);
+
+        // Setup filter chips
+        filterChipGroup.setOnCheckedStateChangeListener((group, checkedIds) -> {
+            if (checkedIds.isEmpty())
+                return;
+            int checkedId = checkedIds.get(0);
+            MediaFilter filter = MediaFilter.ALL;
+            if (checkedId == R.id.chip_images) {
+                filter = MediaFilter.IMAGES_ONLY;
+            } else if (checkedId == R.id.chip_videos) {
+                filter = MediaFilter.VIDEOS_ONLY;
+            }
+            currentFilter = filter; // Update currentFilter
+            imageListAdapter.setFilter(filter);
+            updateEmptyState();
+        });
+
+        updateEmptyState();
 
         // Handle incoming share intent
         Intent intent = getIntent();
@@ -329,11 +360,81 @@ public class ImageListActivity extends AppCompatActivity implements OnCropListen
     }
 
     @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.image_list_menu, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem selectAllItem = menu.findItem(R.id.action_select_all);
+        MenuItem deselectAllItem = menu.findItem(R.id.action_deselect_all);
+
+        int selectedCount = imageListAdapter.getSelectedImages().size();
+        int visibleCount = imageListAdapter.getVisibleItemCount();
+
+        if (selectedCount == 0) {
+            selectAllItem.setVisible(visibleCount > 0);
+            deselectAllItem.setVisible(false);
+        } else if (selectedCount == visibleCount && visibleCount > 0) {
+            selectAllItem.setVisible(false);
+            deselectAllItem.setVisible(true);
+        } else {
+            selectAllItem.setVisible(true);
+            deselectAllItem.setVisible(true);
+        }
+
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == android.R.id.home) {
             finish();
+            return true;
+        } else if (item.getItemId() == R.id.action_select_all) {
+            imageListAdapter.selectAll();
+            invalidateOptionsMenu();
+            return true;
+        } else if (item.getItemId() == R.id.action_deselect_all) {
+            imageListAdapter.deselectAll();
+            invalidateOptionsMenu();
+            return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    private void updateSelectionUI(int selectedCount) {
+        if (selectedCount > 0) {
+            removeButton.setVisibility(View.VISIBLE);
+            selectionCountText.setVisibility(View.VISIBLE);
+            selectionCountText.setText(getResources().getQuantityString(
+                    R.plurals.items_selected, selectedCount, selectedCount));
+        } else {
+            removeButton.setVisibility(View.GONE);
+            selectionCountText.setVisibility(View.GONE);
+        }
+        invalidateOptionsMenu();
+    }
+
+    private void updateEmptyState() {
+        int visibleCount = imageListAdapter.getVisibleItemCount();
+        if (visibleCount == 0) {
+            emptyState.setVisibility(View.VISIBLE);
+            // Update message based on filter
+            int checkedId = filterChipGroup.getCheckedChipId();
+            if (checkedId == R.id.chip_images) {
+                emptyStateText.setText(getString(R.string.no_media_filtered,
+                        getString(R.string.media_type_image)));
+            } else if (checkedId == R.id.chip_videos) {
+                emptyStateText.setText(getString(R.string.no_media_filtered,
+                        getString(R.string.media_type_video)));
+            } else {
+                emptyStateText.setText(R.string.no_media_message);
+            }
+        } else {
+            emptyState.setVisibility(View.GONE);
+        }
     }
 
     private void imagePickerCallback(List<Uri> uris) {

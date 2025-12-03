@@ -43,7 +43,6 @@ public class SharedPreferencesManager {
     private static final String PREFERENCE_KEY_SWIPE = "swipe";
     private static final String PREFERENCE_KEY_MUTE_VIDEOS = "mute_videos";
 
-
     public enum Ordering {
         SELECTION(0, PREFERENCE_KEY_URI_LIST) {
             @Override
@@ -125,10 +124,15 @@ public class SharedPreferencesManager {
             return result;
         }
     }
+
     private SharedPreferences preferences;
 
     public SharedPreferencesManager(@NonNull SharedPreferences preferences) {
         this.preferences = preferences;
+    }
+
+    public SharedPreferences getPreferences() {
+        return preferences;
     }
 
     public Ordering getCurrentOrdering(Resources r) {
@@ -243,7 +247,8 @@ public class SharedPreferencesManager {
     }
 
     public TooWideImagesRule getTooWideImagesRule(Resources r) {
-        String value = preferences.getString(PREFERENCE_KEY_TOO_WIDE_IMAGES_RULE, TooWideImagesRule.SCALE_DOWN.getValue(r));
+        String value = preferences.getString(PREFERENCE_KEY_TOO_WIDE_IMAGES_RULE,
+                TooWideImagesRule.SCALE_DOWN.getValue(r));
         return TooWideImagesRule.forValue(value, r);
     }
 

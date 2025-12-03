@@ -99,4 +99,19 @@
     </string-array>
     <string name="no_images_selected_text">Please select at least one image before setting the wallpaper.</string>
     <string name="processing_images">Processing images...</string>
+    
+    <!-- Filter and selection strings -->
+    <string name="filter_all">All</string>
+    <string name="filter_images_only">Images Only</string>
+    <string name="filter_videos_only">Videos Only</string>
+    <string name="select_all">Select All</string>
+    <string name="deselect_all">Deselect All</string>
+    <plurals name="items_selected">
+        <item quantity="one">%d item selected</item>
+        <item quantity="other">%d items selected</item>
+    </plurals>
+    <string name="no_media_message">No media added yet.\nTap + to add images or videos.</string>
+    <string name="no_media_filtered">No %s found.</string>
+    <string name="media_type_image">Image</string>
+    <string name="media_type_video">Video</string>
 </resources>

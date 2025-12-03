@@ -39,10 +39,13 @@ import io.github.doubi88.slideshowwallpaper.listeners.OnSelectListener;
 import io.github.doubi88.slideshowwallpaper.utilities.AsyncTaskLoadImages;
 import io.github.doubi88.slideshowwallpaper.utilities.ImageInfo;
 import io.github.doubi88.slideshowwallpaper.utilities.ProgressListener;
+import io.github.doubi88.slideshowwallpaper.preferences.imageList.ImageListActivity.MediaFilter;
 
 public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> {
 
     private List<Uri> uris;
+    private List<Uri> filteredUris;
+    private MediaFilter currentFilter = MediaFilter.ALL;
     private List<OnSelectListener> listeners;
     private OnCropListener cropListener;
     private HashMap<Uri, AsyncTaskLoadImages> loading;
@@ -51,6 +54,7 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
     public ImageListAdapter(List<Uri> uris) {
         this.selectedImages = new HashSet<>();
         this.uris = new ArrayList<>(uris);
+        this.filteredUris = new ArrayList<>(uris);
         listeners = new LinkedList<>();
         loading = new HashMap<>();
     }
@@ -97,7 +101,7 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
 
     @Override
     public void onBindViewHolder(@NonNull ImageInfoViewHolder holder, int position) {
-        final Uri uri = uris.get(position);
+        final Uri uri = filteredUris.get(position);
         AsyncTaskLoadImages asyncTask = loading.get(uri);
         if (asyncTask == null) {
             asyncTask = new AsyncTaskLoadImages(holder.itemView.getContext(), holder.itemView.getWidth(),
@@ -150,7 +154,7 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
 
     @Override
     public int getItemCount() {
-        return uris.size();
+        return filteredUris.size();
     }
 
     public void delete(HashSet<ImageInfo> imageInfos) {
@@ -181,27 +185,89 @@ public class ImageListAdapter extends RecyclerView.Adapter<ImageInfoViewHolder> 
         return this.selectedImages;
     }
 
-    public void addUris(List<Uri> uris) {
-        int oldSize = this.uris.size();
-        this.uris.addAll(uris);
+    public int getVisibleItemCount() {
+        return filteredUris.size();
+    }
 
-        notifyItemRangeInserted(oldSize, uris.size());
+    public void setFilter(MediaFilter filter) {
+        this.currentFilter = filter;
+        applyFilter();
+    }
+
+    private void applyFilter() {
+        filteredUris.clear();
+        for (Uri uri : uris) {
+            boolean isVideo = isVideoUri(uri);
+            if (currentFilter == MediaFilter.ALL ||
+                    (currentFilter == MediaFilter.IMAGES_ONLY && !isVideo) ||
+                    (currentFilter == MediaFilter.VIDEOS_ONLY && isVideo)) {
+                filteredUris.add(uri);
+            }
+        }
+        notifyDataSetChanged();
+    }
+
+    private boolean isVideoUri(Uri uri) {
+        try {
+            // Simple heuristic: check if path contains video indicators
+            String uriString = uri.toString();
+            return uriString.contains("/video/") || uriString.contains("Movies");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    public void selectAll() {
+        for (Uri uri : filteredUris) {
+            ImageInfo info = new ImageInfo(uri, null, 0, null);
+            if (!selectedImages.contains(info)) {
+                selectedImages.add(info);
+            }
+        }
+        notifyDataSetChanged();
+        notifyListeners();
+    }
+
+    public void deselectAll() {
+        selectedImages.clear();
+        notifyDataSetChanged();
+        notifyListeners();
+    }
+
+    public void addUris(List<Uri> uris) {
+        int oldSize = this.filteredUris.size();
+        this.uris.addAll(uris);
+        applyFilter();
+
+        if (currentFilter == MediaFilter.ALL) {
+            notifyItemRangeInserted(oldSize, uris.size());
+        } else {
+            notifyDataSetChanged();
+        }
     }
 
     public void replaceUri(Uri oldUri, Uri newUri) {
-        int index = uris.indexOf(oldUri);
-        if (index != -1) {
+        int uriIndex = uris.indexOf(oldUri);
+        int filteredIndex = filteredUris.indexOf(oldUri);
+
+        if (uriIndex != -1) {
             // Check if the old URI was selected
-            // We create dummy ImageInfos because equals() only checks URI
             ImageInfo oldInfo = new ImageInfo(oldUri, null, 0, null);
             if (selectedImages.contains(oldInfo)) {
                 selectedImages.remove(oldInfo);
                 selectedImages.add(new ImageInfo(newUri, null, 0, null));
-                notifyListeners(); // Notify that selection set changed (content-wise)
+                notifyListeners();
             }
 
-            uris.set(index, newUri);
-            notifyItemChanged(index);
+            uris.set(uriIndex, newUri);
+
+            if (filteredIndex != -1) {
+                filteredUris.set(filteredIndex, newUri);
+                notifyItemChanged(filteredIndex);
+            } else {
+                // The old URI was in uris but not in filtered list
+                // Just update uris, no notification needed
+            }
         }
     }
 }

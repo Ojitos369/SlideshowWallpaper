@@ -83,4 +83,20 @@
     <string name="remove_image">Eliminar imagen(es)</string>
     <string name="no_images_selected_text">Por favor, selecciona al menos una imagen antes de establecer el fondo de pantalla.</string>
     <string name="processing_images">Procesando imágenes...</string>
+    
+    <!-- Filter and selection strings -->
+    <string name="filter_all">Todos</string>
+    <string name="filter_images_only">Solo Imágenes</string>
+    <string name="filter_videos_only">Solo Videos</string>
+    <string name="select_all">Seleccionar Todo</string>
+    <string name="deselect_all">Deseleccionar Todo</string>
+    <plurals name="items_selected">
+        <item quantity="one">%d elemento seleccionado</item>
+        <item quantity="many">%d elementos seleccionados</item>
+        <item quantity="other">%d elementos seleccionados</item>
+    </plurals>
+    <string name="no_media_message">No hay multimedia agregada aún.\nToca + para agregar imágenes o videos.</string>
+    <string name="no_media_filtered">No se encontraron %s.</string>
+    <string name="media_type_image">imágenes</string>
+    <string name="media_type_video">videos</string>
 </resources>

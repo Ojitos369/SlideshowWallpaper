@@ -23,8 +23,11 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="@dimen/image_preview_height"
-    app:cardCornerRadius="4dp"
-    android:layout_margin="3dp">
+    app:cardCornerRadius="8dp"
+    app:cardElevation="4dp"
+    app:cardMaxElevation="8dp"
+    android:layout_margin="6dp"
+    android:foreground="?attr/selectableItemBackground">
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
@@ -42,7 +45,31 @@
             android:layout_height="match_parent"
             android:scaleType="centerCrop"
             android:contentDescription="@string/image_view_description"/>
+        
+        <!-- Selection overlay -->
+        <View
+            android:id="@+id/selection_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/primaryLightColor"
+            android:alpha="0.3"
+            android:visibility="gone" />
     </FrameLayout>
+    
+    <!-- Media type indicator -->
+    <ImageView
+        android:id="@+id/media_type_icon"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="6dp"
+        android:background="@drawable/circle_background"
+        android:src="@android:drawable/ic_media_play"
+        android:padding="6dp"
+        android:alpha="0.9"
+        android:visibility="gone"
+        android:contentDescription="@string/media_type_video" />
+    
     <ImageView
         android:id="@+id/check_icon"
         android:background="@drawable/circle_background"

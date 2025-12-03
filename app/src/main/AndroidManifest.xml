@@ -50,12 +50,31 @@
 
         <activity
             android:name=".preferences.WallpaperPreferencesActivity"
+            android:exported="false"
+            android:theme="@style/PreferenceTheme" />
+        
+        <!-- New Compose-based UI -->
+        <activity
+            android:name=".ui.ComposeMainActivity"
             android:exported="true"
-            android:theme="@style/PreferenceTheme">
+            android:theme="@android:style/Theme.NoTitleBar"
+            android:label="Slideshow (Modern UI)">
             <intent-filter>
                 <category android:name="android.intent.category.LAUNCHER" />
-
                 <action android:name="android.intent.action.MAIN" />
+            </intent-filter>
+            <!-- Handle share from gallery -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
             </intent-filter>
         </activity>
         <activity
@@ -65,15 +84,7 @@
             android:theme="@style/AppTheme"/>
         <activity
             android:name=".preferences.imageList.ImageListActivity"
-            android:exported="true"
-            android:label="@string/image_list_name"
-            android:theme="@style/AppTheme">
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="image/*" />
-                <data android:mimeType="video/*" />
-            </intent-filter>
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />

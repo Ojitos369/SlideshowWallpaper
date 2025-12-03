@@ -59,6 +59,8 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder
 
     private LinkedList<OnSelectListener> listeners;
     private OnCropListener cropListener;
+    private View selectionOverlay;
+    private ImageView mediaTypeIcon;
 
     public ImageInfoViewHolder(View itemView) {
         super(itemView);
@@ -67,6 +69,8 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder
         checkIcon = itemView.findViewById(R.id.check_icon);
         cropIcon = itemView.findViewById(R.id.crop_icon);
         frameLayout = itemView.findViewById(R.id.frame_layout);
+        selectionOverlay = itemView.findViewById(R.id.selection_overlay);
+        mediaTypeIcon = itemView.findViewById(R.id.media_type_icon);
 
         itemView.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -93,6 +97,14 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder
         if (imageInfo == null || !uri.equals(imageInfo.getUri())) {
             imageInfo = ImageLoader.loadFileNameAndSize(uri, imageView.getContext());
         }
+
+        // Update media type indicator
+        String mimeType = imageView.getContext().getContentResolver().getType(uri);
+        if (mimeType != null && mimeType.startsWith("video/")) {
+            mediaTypeIcon.setVisibility(View.VISIBLE);
+        } else {
+            mediaTypeIcon.setVisibility(View.GONE);
+        }
     }
 
     private void toggleSelection() {
@@ -112,6 +124,7 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder
         this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.secondaryTextColor));
         this.checkIcon.setVisibility(View.GONE);
         this.cropIcon.setVisibility(View.GONE);
+        this.selectionOverlay.setVisibility(View.GONE);
 
         imageIsSelected = false;
     }
@@ -119,9 +132,10 @@ public class ImageInfoViewHolder extends RecyclerView.ViewHolder
     public void SelectImage() {
         Log.i(ImageInfoViewHolder.class.getSimpleName(), "Select the image");
 
-        this.frameLayout.setPadding(10, 10, 10, 10);
-        this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.primaryLightColor));
+        this.frameLayout.setPadding(4, 4, 4, 4);
+        this.frameLayout.setBackgroundColor(ContextCompat.getColor(imageView.getContext(), R.color.primaryColor));
         this.checkIcon.setVisibility(View.VISIBLE);
+        this.selectionOverlay.setVisibility(View.VISIBLE);
 
         // Check if it is a video to hide the edit button
         boolean isVideo = false;
