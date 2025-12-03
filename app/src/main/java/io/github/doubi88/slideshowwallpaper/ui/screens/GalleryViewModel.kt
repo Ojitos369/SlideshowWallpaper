@@ -22,8 +22,14 @@ import kotlinx.coroutines.launch
 
 data class MediaItem(
     val uri: Uri,
-    val isVideo: Boolean = false
+    val isVideo: Boolean = false,
+    val name: String = "",
+    val lastModified: Long = 0
 )
+
+enum class SortOption {
+    DATE_DESC, DATE_ASC, NAME_ASC, NAME_DESC
+}
 
 enum class MediaFilter {
     ALL, IMAGES_ONLY, VIDEOS_ONLY
@@ -33,7 +39,8 @@ data class GalleryUiState(
     val mediaItems: List<MediaItem> = emptyList(),
     val selectedItems: Set<Uri> = emptySet(),
     val currentFilter: MediaFilter = MediaFilter.ALL,
-    val isLoading: Boolean = false
+    val isLoading: Boolean = false,
+    val sortOption: SortOption = SortOption.DATE_DESC
 )
 
 class GalleryViewModel(
@@ -99,16 +106,55 @@ class GalleryViewModel(
             }
             
             val mediaItems = validUris.map { uri ->
+                var name = "Unknown"
+                var lastModified = 0L
+                try {
+                    context.contentResolver.query(uri, arrayOf(
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.DATE_MODIFIED
+                    ), null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                            val dateIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DATE_MODIFIED)
+                            if (nameIndex != -1) name = cursor.getString(nameIndex) ?: "Unknown"
+                            if (dateIndex != -1) lastModified = cursor.getLong(dateIndex)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("GalleryViewModel", "Error getting file info for $uri", e)
+                }
+                
                 MediaItem(
                     uri = uri,
-                    isVideo = isVideoUri(uri)
+                    isVideo = isVideoUri(uri),
+                    name = name,
+                    lastModified = lastModified
                 )
             }
             
+            val sortedItems = sortMediaItems(mediaItems, _uiState.value.sortOption)
+            
             _uiState.value = _uiState.value.copy(
-                mediaItems = mediaItems,
+                mediaItems = sortedItems,
                 selectedItems = emptySet()
             )
+        }
+    }
+
+    fun setSortOption(option: SortOption) {
+        val sortedItems = sortMediaItems(_uiState.value.mediaItems, option)
+        _uiState.value = _uiState.value.copy(
+            sortOption = option,
+            mediaItems = sortedItems
+        )
+    }
+
+    private fun sortMediaItems(items: List<MediaItem>, option: SortOption): List<MediaItem> {
+        return when (option) {
+            SortOption.DATE_DESC -> items.sortedByDescending { it.lastModified }
+            SortOption.DATE_ASC -> items.sortedBy { it.lastModified }
+            SortOption.NAME_ASC -> items.sortedBy { it.name }
+            SortOption.NAME_DESC -> items.sortedByDescending { it.name }
         }
     }
     
@@ -166,8 +212,24 @@ class GalleryViewModel(
                     }
                     
                     try {
+                        // Extract original name
+                        var originalName: String? = null
+                        try {
+                            context.contentResolver.query(originalUri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                                if (cursor.moveToFirst()) {
+                                    val nameIndex = cursor.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                                    if (nameIndex != -1) {
+                                        val fullName = cursor.getString(nameIndex)
+                                        originalName = fullName.substringBeforeLast(".")
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w("GalleryViewModel", "Could not get original name", e)
+                        }
+
                         // Copy to public MediaStore album
-                        val albumUri = MediaStoreHelper.copyToPublicAlbum(context, originalUri)
+                        val albumUri = MediaStoreHelper.copyToPublicAlbum(context, originalUri, originalName)
                         val uriToSave = albumUri ?: originalUri // Fallback
                         
                         // Double-check again before adding

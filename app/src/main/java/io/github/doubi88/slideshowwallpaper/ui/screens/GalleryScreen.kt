@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -70,6 +71,12 @@ fun GalleryScreen(
     
     // Crop state
     var uriToCrop by rememberSaveable { mutableStateOf<Uri?>(null) }
+    
+    // Delete confirmation state
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    
+    // Sorting menu state
+    var showSortMenu by remember { mutableStateOf(false) }
     
     val context = LocalContext.current
     
@@ -346,18 +353,68 @@ fun GalleryScreen(
                         )
                     }
                     
-                    // Select All / Deselect All buttons (always visible)
+                    // Sorting and Selection
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = { viewModel.selectAll() }) {
-                            Text("Select All")
+                        // Sort Button
+                        Box {
+                            TextButton(onClick = { showSortMenu = true }) {
+                                Icon(Icons.Default.List, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Sort")
+                            }
+                            DropdownMenu(
+                                expanded = showSortMenu,
+                                onDismissRequest = { showSortMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Date (Newest)") },
+                                    onClick = { 
+                                        viewModel.setSortOption(SortOption.DATE_DESC)
+                                        showSortMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Date (Oldest)") },
+                                    onClick = { 
+                                        viewModel.setSortOption(SortOption.DATE_ASC)
+                                        showSortMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Name (A-Z)") },
+                                    onClick = { 
+                                        viewModel.setSortOption(SortOption.NAME_ASC)
+                                        showSortMenu = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Name (Z-A)") },
+                                    onClick = { 
+                                        viewModel.setSortOption(SortOption.NAME_DESC)
+                                        showSortMenu = false
+                                    }
+                                )
+                            }
                         }
-                        TextButton(onClick = { viewModel.deselectAll() }) {
-                            Text("Deselect All")
+
+                        // Select/Deselect Buttons
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { viewModel.selectAll() }) {
+                                Text("Select All")
+                            }
+                            TextButton(onClick = { viewModel.deselectAll() }) {
+                                Text("Deselect All")
+                            }
                         }
                     }
+                    
+
                 }
             }
         },
@@ -369,7 +426,7 @@ fun GalleryScreen(
                 // Delete FAB (only show when items selected)
                 if (uiState.selectedItems.isNotEmpty()) {
                     FloatingActionButton(
-                        onClick = { viewModel.removeSelectedItems() },
+                        onClick = { showDeleteDialog = true },
                         containerColor = MaterialTheme.colorScheme.errorContainer,
                         contentColor = MaterialTheme.colorScheme.onErrorContainer
                     ) {
@@ -455,11 +512,12 @@ fun GalleryScreen(
                     key = { it.uri }
                 ) { mediaItem ->
                         MediaCard(
-                            uri = mediaItem.uri,
-                            isSelected = mediaItem.uri in uiState.selectedItems,
-                            isVideo = mediaItem.isVideo,
-                            thumbnailRatio = thumbnailRatio,
-                            onClick = {
+                                uri = mediaItem.uri,
+                                isSelected = mediaItem.uri in uiState.selectedItems,
+                                isVideo = mediaItem.isVideo,
+                                thumbnailRatio = thumbnailRatio,
+                                lastModified = mediaItem.lastModified,
+                                onClick = {
                                 // Tap = select/unselect
                                 viewModel.toggleSelection(mediaItem.uri)
                             },
@@ -484,7 +542,7 @@ fun GalleryScreen(
                                         val destinationUri = Uri.fromFile(cacheFile)
                                         
                                         val options = UCrop.Options()
-                                        options.setAspectRatioOptions(0,
+                                        options.setAspectRatioOptions(1,
                                             com.yalantis.ucrop.model.AspectRatio("Original", 0f, 0f),
                                             com.yalantis.ucrop.model.AspectRatio("9:16", 9f, 16f),
                                             com.yalantis.ucrop.model.AspectRatio("16:9", 16f, 9f),
@@ -541,6 +599,30 @@ fun GalleryScreen(
         VideoPlayerDialog(
             uri = uri,
             onDismiss = { videoPlayerUri = null }
+        )
+    }
+    
+    // Delete Confirmation Dialog
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("Delete Media") },
+            text = { Text("Are you sure you want to delete ${uiState.selectedItems.size} items?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.removeSelectedItems()
+                        showDeleteDialog = false
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 }

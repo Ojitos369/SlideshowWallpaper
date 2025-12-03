@@ -41,6 +41,7 @@ fun MediaCard(
     isSelected: Boolean = false,
     isVideo: Boolean = false,
     thumbnailRatio: String = "3:4",
+    lastModified: Long = 0,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onFullscreenClick: () -> Unit = {},
@@ -117,7 +118,10 @@ fun MediaCard(
                 }
             } else {
                 AsyncImage(
-                    model = uri,
+                    model = coil.request.ImageRequest.Builder(context)
+                        .data(uri)
+                        .setParameter("key", lastModified)
+                        .build(),
                     contentDescription = "Image",
                     modifier = Modifier.fillMaxWidth().aspectRatio(3f / 4f),
                     contentScale = ContentScale.Crop

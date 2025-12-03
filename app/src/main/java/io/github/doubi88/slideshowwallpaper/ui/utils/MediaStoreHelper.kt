@@ -14,7 +14,7 @@ object MediaStoreHelper {
     private const val ALBUM_NAME = "LumaLoop"
     private const val TAG = "MediaStoreHelper"
     
-    suspend fun copyToPublicAlbum(context: Context, sourceUri: Uri): Uri? = withContext(Dispatchers.IO) {
+    suspend fun copyToPublicAlbum(context: Context, sourceUri: Uri, originalName: String? = null): Uri? = withContext(Dispatchers.IO) {
         try {
             val inputStream = context.contentResolver.openInputStream(sourceUri) ?: return@withContext null
             
@@ -33,7 +33,8 @@ object MediaStoreHelper {
                 else -> if (isVideo) ".mp4" else ".jpg"
             }
             
-            val displayName = "lumaloop_${System.currentTimeMillis()}$extension"
+            val cleanOriginalName = originalName?.replace(Regex("[^a-zA-Z0-9]"), "_") ?: "media"
+            val displayName = "lumaloop_${cleanOriginalName}_${System.currentTimeMillis()}$extension"
             
             // Prepare content values
             val contentValues = ContentValues().apply {
