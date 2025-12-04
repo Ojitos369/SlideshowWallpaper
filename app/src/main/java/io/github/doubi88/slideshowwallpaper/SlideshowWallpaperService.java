@@ -16,6 +16,7 @@ import android.view.SurfaceHolder;
 import android.util.Log;
 
 import androidx.annotation.RequiresApi;
+import androidx.preference.PreferenceManager;
 
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager;
 import io.github.doubi88.slideshowwallpaper.utilities.CurrentMediaHandler;
@@ -31,21 +32,25 @@ public class SlideshowWallpaperService extends WallpaperService {
         return new SlideshowWallpaperEngine();
     }
 
-    private class SlideshowWallpaperEngine extends Engine {
+    private class SlideshowWallpaperEngine extends Engine
+            implements SharedPreferences.OnSharedPreferenceChangeListener {
         private static final String TAG = "SlideshowWallpaperEngine";
         private final Handler handler = new Handler(Looper.getMainLooper());
         private CurrentMediaHandler currentMediaHandler;
         private int width = 0;
         private int height = 0;
         private final SharedPreferencesManager manager;
+        private final SharedPreferences sharedPrefs;
         private GestureDetector gestureDetector;
         private boolean surfaceReady = false;
 
         SlideshowWallpaperEngine() {
-            SharedPreferences prefs = SlideshowWallpaperService.this
-                    .getSharedPreferences(getPackageName() + "_preferences", MODE_PRIVATE);
-            manager = new SharedPreferencesManager(prefs);
+            // Use default SharedPreferences to match WallpaperPreferencesFragment
+            sharedPrefs = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
+            manager = new SharedPreferencesManager(sharedPrefs);
             initGestureDetector();
+            // Register for preference changes
+            sharedPrefs.registerOnSharedPreferenceChangeListener(this);
         }
 
         private void initGestureDetector() {
@@ -165,8 +170,40 @@ public class SlideshowWallpaperService extends WallpaperService {
         }
 
         @Override
+        public void onSharedPreferenceChanged(SharedPreferences prefs, String key) {
+            Log.d(TAG, "Preference changed: " + key);
+            try {
+                // Handle media list changes - force reload
+                if ("pick_images".equals(key) || "uri_list_random".equals(key)) {
+                    Log.d(TAG, "Media list changed, forcing reload");
+                    if (currentMediaHandler != null && surfaceReady && isVisible()) {
+                        handler.postDelayed(() -> {
+                            try {
+                                if (currentMediaHandler != null) {
+                                    currentMediaHandler.forceNextMedia(getApplicationContext());
+                                }
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error forcing next media", e);
+                            }
+                        }, 300);
+                    }
+                }
+                // Handle ordering or interval changes - advance to apply
+                else if ("ordering".equals(key) || "seconds".equals(key) ||
+                        "too_wide_images_rule".equals(key)) {
+                    Log.d(TAG, "Settings changed, will apply on next media");
+                    // Settings will be read on next media change, no immediate action needed
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error handling preference change", e);
+            }
+        }
+
+        @Override
         public void onDestroy() {
             super.onDestroy();
+            // Unregister listener
+            sharedPrefs.unregisterOnSharedPreferenceChangeListener(this);
             if (currentMediaHandler != null)
                 currentMediaHandler.stop();
         }

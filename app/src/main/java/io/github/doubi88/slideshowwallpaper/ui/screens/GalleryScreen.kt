@@ -13,8 +13,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
@@ -30,12 +28,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yalantis.ucrop.UCrop
 import io.github.doubi88.slideshowwallpaper.preferences.SharedPreferencesManager
 import io.github.doubi88.slideshowwallpaper.ui.components.CropHelper
 import io.github.doubi88.slideshowwallpaper.ui.components.FullscreenImageDialog
+import io.github.doubi88.slideshowwallpaper.ui.components.LoadingOverlay
 import io.github.doubi88.slideshowwallpaper.ui.components.MediaCard
 import io.github.doubi88.slideshowwallpaper.ui.components.VideoPlayerDialog
 import java.io.File
@@ -406,19 +404,14 @@ fun GalleryScreen(
                     uriToCrop = null
                 }
             }
-    // Loading indicator
-    if (uiState.isLoading) {
-        Box(
-                modifier =
-                        Modifier.fillMaxSize()
-                                .background(
-                                        androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f)
-                                )
-                                .zIndex(10f) // Ensure it's on top
-                                .clickable(enabled = false) {}, // Block touches
-                contentAlignment = Alignment.Center
-        ) { CircularProgressIndicator(color = MaterialTheme.colorScheme.primary) }
-    }
+    // Loading overlay with progress
+    LoadingOverlay(
+            isVisible = uiState.isLoading,
+            currentFileName = uiState.currentFileName,
+            processedFiles = uiState.processedFiles,
+            totalFiles = uiState.totalFiles,
+            progress = uiState.loadingProgress
+    )
 
     Scaffold(
             topBar = {

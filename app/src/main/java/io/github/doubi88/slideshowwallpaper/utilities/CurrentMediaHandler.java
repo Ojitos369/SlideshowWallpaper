@@ -97,10 +97,27 @@ public class CurrentMediaHandler {
 
     private void initializeExoPlayer() {
         if (exoPlayer == null) {
-            // Standard ExoPlayer without custom ImageRenderer/ImageOutput
-            // We handle rendering via GLWallpaperRenderer
-            exoPlayer = new ExoPlayer.Builder(context).build();
-            Log.d(TAG, "ExoPlayer created for GL rendering");
+            // Configure LoadControl for optimized video playback with large files
+            // Lower buffer sizes for faster startup, reduces memory usage
+            androidx.media3.exoplayer.DefaultLoadControl loadControl = new androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(
+                            2500, // Min buffer: 2.5s for fast startup
+                            10000, // Max buffer: 10s to limit memory usage
+                            1500, // Buffer for playback: 1.5s
+                            2000 // Buffer for re-buffer: 2s
+                    )
+                    .setPrioritizeTimeOverSizeThresholds(true)
+                    .build();
+
+            // Build ExoPlayer with optimized settings
+            exoPlayer = new ExoPlayer.Builder(context)
+                    .setLoadControl(loadControl)
+                    .build();
+
+            // Set video scaling mode for better performance
+            exoPlayer.setVideoScalingMode(android.media.MediaCodec.VIDEO_SCALING_MODE_SCALE_TO_FIT);
+
+            Log.d(TAG, "ExoPlayer created with optimized buffer settings for large videos");
 
             exoPlayer.addListener(new Player.Listener() {
                 @Override
@@ -108,6 +125,10 @@ public class CurrentMediaHandler {
                     if (playbackState == Player.STATE_ENDED) {
                         Log.d(TAG, "Media playback completed (video or image)");
                         forceNextMedia(context);
+                    } else if (playbackState == Player.STATE_BUFFERING) {
+                        Log.d(TAG, "Buffering video...");
+                    } else if (playbackState == Player.STATE_READY) {
+                        Log.d(TAG, "Video ready to play");
                     }
                 }
 
@@ -118,7 +139,8 @@ public class CurrentMediaHandler {
 
                 @Override
                 public void onPlayerError(androidx.media3.common.PlaybackException error) {
-                    Log.e(TAG, "ExoPlayer error", error);
+                    Log.e(TAG, "ExoPlayer error: " + error.getMessage(), error);
+                    // Try to recover or skip to next media
                     forceNextMedia(context);
                 }
             });
@@ -131,27 +153,47 @@ public class CurrentMediaHandler {
     private void prepareMedia(Uri uri, boolean isVideo) {
         Log.d(TAG, "prepareMedia: " + uri + " (isVideo=" + isVideo + ")");
 
-        isVideoPlaying = isVideo;
         initializeExoPlayer();
 
+        // Initialize GL renderer if needed
         if (glRenderer == null && surfaceHolder != null) {
             glRenderer = new GLWallpaperRenderer(context);
             glRenderer.setSurface(surfaceHolder);
-
-            // Setup SurfaceTexture for video
-            videoSurfaceTexture = new SurfaceTexture(glRenderer.getVideoTextureId());
-            videoSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
-                if (isVideoPlaying) {
-                    surfaceTexture.updateTexImage();
-                    glRenderer.drawVideo();
-                }
-            });
-            videoSurface = new Surface(videoSurfaceTexture);
         }
 
         try {
             if (isVideo) {
+                // For video: Create fresh SurfaceTexture every time to avoid stale frames
+                if (videoSurfaceTexture != null) {
+                    videoSurfaceTexture.release();
+                    videoSurfaceTexture = null;
+                }
+                if (videoSurface != null) {
+                    videoSurface.release();
+                    videoSurface = null;
+                }
+
+                // Create new SurfaceTexture for this video
+                videoSurfaceTexture = new SurfaceTexture(glRenderer.getVideoTextureId());
+                videoSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
+                    // Always render when frame is available during video playback
+                    try {
+                        surfaceTexture.updateTexImage();
+                        if (glRenderer != null) {
+                            glRenderer.drawVideo();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error rendering video frame", e);
+                    }
+                });
+                videoSurface = new Surface(videoSurfaceTexture);
+
+                // Set the surface BEFORE setting isVideoPlaying
                 exoPlayer.setVideoSurface(videoSurface);
+
+                // Now mark as video playing
+                isVideoPlaying = true;
+
                 MediaItem mediaItem = MediaItem.fromUri(uri);
                 if (manager.getMuteVideos()) {
                     exoPlayer.setVolume(0f);
@@ -163,8 +205,10 @@ public class CurrentMediaHandler {
                 if (!isPaused) {
                     exoPlayer.play();
                 }
+                Log.d(TAG, "Video playback started");
             } else {
-                // For images, we load bitmap manually and render via GL
+                // For images: Stop video first, then load image
+                isVideoPlaying = false;
                 exoPlayer.stop();
                 exoPlayer.clearMediaItems();
 
@@ -177,7 +221,7 @@ public class CurrentMediaHandler {
 
                         if (bitmap != null) {
                             new Handler(Looper.getMainLooper()).post(() -> {
-                                if (!isVideoPlaying) {
+                                if (!isVideoPlaying && glRenderer != null) {
                                     glRenderer.uploadImage(bitmap);
                                     glRenderer.drawImage();
 
